@@ -1,4 +1,4 @@
-name: TOPG integrated build
+name: TOPG release build
 on:
   workflow_dispatch:
   schedule:
@@ -16,6 +16,10 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      sha256: ${{ steps.package.outputs.sha256 }}
+      artifact_id: ${{ steps.module_artifact.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,6 +47,7 @@ jobs:
               output.write('sha='+sha+'\n')
           PY
       - uses: actions/cache/restore@v4
+        if: github.event_name != 'workflow_dispatch'
         id: built
         with:
           path: .tee-build-success
@@ -156,6 +161,7 @@ jobs:
           ENGINE_SHA: ${{ steps.engine.outputs.sha }}
         run: python3 tools/tee/package_topg.py . staging/TOPG
       - uses: actions/upload-artifact@v7
+        id: module_artifact
         if: steps.built.outputs.cache-hit != 'true'
         with:
           path: ${{ steps.package.outputs.zip_path }}
@@ -174,3 +180,39 @@ jobs:
         with:
           path: .tee-build-success
           key: topg-engine-${{ github.sha }}-${{ steps.engine.outputs.sha }}
+  publish:
+    needs: build
+    if: github.repository == 'wfire06100/TOPG' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: release-files
+          merge-multiple: true
+          skip-decompress: true
+      - name: Verify module and generate release description
+        id: release
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+        run: python3 tools/tee/prepare_release.py
+      - name: Publish release with verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          ZIP: ${{ steps.release.outputs.zip }}
+          CHECKSUM: ${{ steps.release.outputs.checksum }}
+          NOTES: ${{ steps.release.outputs.notes }}
+        run: |
+          set -eu
+          gh release create "$VERSION" "$ZIP" "$CHECKSUM" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "TOPG $VERSION" --notes-file "$NOTES" --draft
+          gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
+          echo "Release publiée : https://github.com/$GITHUB_REPOSITORY/releases/tag/$VERSION" >> "$GITHUB_STEP_SUMMARY"
