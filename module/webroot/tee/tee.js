@@ -46,4 +46,5 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 (function(){
 'use strict';
 const script=document.createElement('script');script.src='tee/tee_layout.js';document.head.append(script);
+const schedule=document.createElement('script');schedule.src='tee/tee_schedule.js';document.head.append(schedule);
 })();
