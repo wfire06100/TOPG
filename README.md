@@ -11,6 +11,8 @@ TOPG is a COPG-VD integration fork maintained by me wfire06100. It preserves the
 - Isolated TEE runtime files in the existing COPG-VD module and persistent data under `/data/adb/COPG-VD/tee/`. The module ID remains `COPG-VD` for compatibility.
 - Build-time version stamping shared by the module, installer, WebUI metadata and versioned ZIP filename. The base version is defined in `module/module.prop`; the engine version is recorded separately.
 
+<img width="1219" height="1290" alt="generated-image (1)" src="https://github.com/user-attachments/assets/7e27b541-9c06-4eed-bc28-55ea12dbedcc" />
+
 ## Building and installation
 
 Use the [TOPG integrated build workflow](.github/workflows/COPG-VD.yml) and install the generated versioned TOPG module ZIP, not a GitHub source archive. The combined TEE build requires Android 10 or newer. Back up existing TEE data before testing, follow the installer prompts and reboot to complete installation or migration.
