@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 wfire06100; SPDX-License-Identifier: Apache-2.0 */
-#tee-tab{min-width:0;width:100%}
-#tee-tab.active{display:block;height:auto!important;max-height:none!important;overflow:visible!important;padding-bottom:calc(var(--safe-b,0px) + 24px)}
+#tee-tab{display:none!important;min-width:0;width:100%}
+#tee-tab.active{display:block!important;height:auto!important;max-height:none!important;overflow:visible!important;padding-bottom:calc(var(--safe-b,0px) + 24px)}
 #tee-tab .tee-layout{display:grid;gap:14px;min-width:0}
 #tee-tab .tee-card{padding:16px;overflow:visible;min-width:0}
 #tee-tab .tee-card[hidden]{display:none}
