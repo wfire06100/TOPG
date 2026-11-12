@@ -4,13 +4,13 @@ If I have forgotten any credits, please let me know via a ticket.
 
 # TOPG
 
-TOPG is a COPG-VD integration fork maintained by me wfire06100. It preserves the COPG-VD base and adds a separately maintained TEESimulator-RS integration. The original COPG-VD README is retained unchanged below, including its documentation, screenshots, contacts and credits.
+TOPG is a COPG-VD integration fork maintained by me . It preserves the COPG-VD base and adds a separately maintained TEESimulator-RS integration. The original COPG-VD README is retained unchanged below, including its documentation, screenshots, contacts and credits.
 
 ## TOPG additions
 
 - An additional TEE tab using the existing WebUI language and theme system.
 - Application targeting with Auto (no suffix), Generate (`!`) and Hack (`?`) modes in `target.txt`.
-- Personal keybox import and scheduled XML/base64 keybox downloads. The default endpoint is `http://evoker.qzz.io/key`; no AlwaysStrong module, repository checkout or native downloader is required for keybox retrieval.
+- Personal keybox import and scheduled XML/base64 keybox downloads. The default endpoint is `http://evoker.qzz.io/key`; no repository checkout or native downloader is required for keybox retrieval.
 - Installation choices to migrate existing TEE data or initialize clean data, with backup safeguards and preservation of persistent keys.
 - Isolated TEE runtime files in the existing COPG-VD module and persistent data under `/data/adb/COPG-VD/tee/`. The module ID remains `COPG-VD` for compatibility.
 - Build-time version stamping shared by the module, installer, WebUI metadata and versioned ZIP filename. The base version is defined in `module/module.prop`; the engine version is recorded separately.
