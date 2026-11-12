@@ -1,5 +1,7 @@
 # NO STARS PLEASE 
 
+If I have forgotten any credits, please let me know via a ticket.
+
 # TOPG
 
 TOPG is a COPG-VD integration fork maintained by me wfire06100. It preserves the COPG-VD base and adds a separately maintained TEESimulator-RS integration. The original COPG-VD README is retained unchanged below, including its documentation, screenshots, contacts and credits.
