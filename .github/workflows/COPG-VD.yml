@@ -47,6 +47,14 @@ jobs:
         with:
           path: .tee-build-success
           key: topg-engine-${{ github.sha }}-${{ steps.engine.outputs.sha }}
+      - name: Integrate shared TEE navigation and regression tests
+        if: steps.built.outputs.cache-hit != 'true'
+        run: |
+          node tests/tee-navigation.test.js --expect-bug
+          python3 tools/tee/fix_navigation.py
+          node --check module/webroot/scripts.js
+          node --check module/webroot/tee/tee.js
+          node tests/tee-navigation.test.js
       - name: Apply portable locks and test descriptor inheritance
         if: steps.built.outputs.cache-hit != 'true'
         run: |
