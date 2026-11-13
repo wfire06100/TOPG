@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 90
     outputs:
       version: ${{ steps.package.outputs.version }}
+      version_code: ${{ steps.package.outputs.version_code }}
       sha256: ${{ steps.package.outputs.sha256 }}
       artifact_id: ${{ steps.module_artifact.outputs.artifact-id }}
     steps:
@@ -205,19 +206,63 @@ jobs:
         id: release
         env:
           VERSION: ${{ needs.build.outputs.version }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
           EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
         run: |
           python3 tools/tee/prepare_release.py
           python3 tools/tee/compliance.py release-note
+          python3 - <<'PY'
+          import json, os, zipfile
+          from pathlib import Path
+          from urllib.parse import quote
+          root = Path('release-files')
+          archives = list(root.rglob('TOPG-*.zip'))
+          if len(archives) != 1:
+              raise SystemExit('Expected exactly one verified TOPG ZIP')
+          with zipfile.ZipFile(archives[0]) as archive:
+              info = json.loads(archive.read('build-info.json'))
+          version = os.environ['VERSION']
+          code = int(os.environ['VERSION_CODE'])
+          if info['version'] != version or type(info['versionCode']) is not int or info['versionCode'] != code:
+              raise SystemExit('Update metadata does not match the module')
+          if not 0 < code <= 2147483647:
+              raise SystemExit('Invalid update versionCode')
+          base = 'https://github.com/' + os.environ['GITHUB_REPOSITORY'] + '/releases/download/' + quote(version, safe='') + '/'
+          update = {'version': version, 'versionCode': code,
+                    'zipUrl': base + quote(archives[0].name, safe=''),
+                    'changelog': base + 'changelog.md'}
+          (root / 'update.json').write_text(json.dumps(update, indent=2) + '\n')
+          (root / 'changelog.md').write_text((root / 'RELEASE_NOTES.md').read_text())
+          PY
       - name: Publish release with verified assets
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.build.outputs.version }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
           ZIP: ${{ steps.release.outputs.zip }}
           CHECKSUM: ${{ steps.release.outputs.checksum }}
           NOTES: ${{ steps.release.outputs.notes }}
+          UPDATE: release-files/update.json
+          CHANGELOG: release-files/changelog.md
         run: |
           set -eu
-          gh release create "$VERSION" "$ZIP" "$CHECKSUM" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "TOPG $VERSION" --notes-file "$NOTES" --draft
-          gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
-          echo "Release publiée : https://github.com/$GITHUB_REPOSITORY/releases/tag/$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          status=$(curl --silent --show-error --location --retry 3 --max-time 60 --output previous-update.json --write-out '%{http_code}' "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/update.json")
+          case "$status" in
+            200)
+              python3 - <<'PY'
+          import json, os
+          with open('previous-update.json') as stream:
+              previous = json.load(stream)['versionCode']
+          current = int(os.environ['VERSION_CODE'])
+          if type(previous) is not int or previous < 1:
+              raise SystemExit('Invalid previous TOPG update manifest')
+          if current <= previous:
+              raise SystemExit('Refusing to publish an update with a non-increasing versionCode')
+          PY
+              ;;
+            404) echo 'Initializing the TOPG update channel.' ;;
+            *) echo "Unable to verify previous update metadata (HTTP $status)."; exit 1 ;;
+          esac
+          gh release create "$VERSION" "$ZIP" "$CHECKSUM" "$UPDATE" "$CHANGELOG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "TOPG $VERSION" --notes-file "$NOTES" --draft
+          gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          echo "Release published: https://github.com/$GITHUB_REPOSITORY/releases/tag/$VERSION" >> "$GITHUB_STEP_SUMMARY"

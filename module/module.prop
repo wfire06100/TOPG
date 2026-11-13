@@ -6,3 +6,4 @@ author=wfire06100; COPG-VD: AlirezaParsi & VD171; TEESimulator contributors
 support=https://github.com/wfire06100/TOPG
 description=COPG-VD with isolated TEESimulator-RS integration
 minMagisk=20.4
+updateJson=https://github.com/wfire06100/TOPG/releases/latest/download/update.json

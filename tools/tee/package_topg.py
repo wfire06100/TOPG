@@ -42,9 +42,9 @@ def package(root, staged, run, attempt, engine_sha, source_sha):
     if current['id'] != 'COPG-VD':
         raise ValueError('Module ID must remain COPG-VD')
     current.update(name='TOPG', version=version, versionCode=str(code))
-    current.pop('updateJson', None)
+    current['updateJson'] = 'https://github.com/wfire06100/TOPG/releases/latest/download/update.json'
     (staged / 'module.prop').write_text(''.join(k + '=' + v + '\n' for k, v in current.items()))
-    # No stale upstream update metadata is shipped without a TOPG release channel.
+    # Discard the inherited COPG-VD manifest; TOPG metadata is published as release assets.
     (staged / 'update.json').unlink(missing_ok=True)
     with zipfile.ZipFile(staged / 'tee/engine.zip') as engine:
         engine_version = props(engine.read('module.prop').decode())['version']
@@ -108,6 +108,8 @@ def package(root, staged, run, attempt, engine_sha, source_sha):
         if not set(required).issubset(archive.namelist()):
             raise ValueError('Module files are not at ZIP root')
         packaged = props(archive.read('module.prop').decode())
+        if packaged.get('updateJson') != 'https://github.com/wfire06100/TOPG/releases/latest/download/update.json':
+            raise ValueError('Invalid TOPG update channel')
         web = json.loads(archive.read('webroot/config.json'))
         for metadata in (json.loads(archive.read('build-info.json')), json.loads(archive.read('webroot/build-info.json')), web):
             if metadata['version'] != packaged['version'] or str(metadata['versionCode']) != packaged['versionCode']:
