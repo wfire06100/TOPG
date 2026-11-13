@@ -52,6 +52,9 @@ jobs:
         with:
           path: .tee-build-success
           key: topg-engine-${{ github.sha }}-${{ steps.engine.outputs.sha }}
+      - name: Prepare dated notices and corresponding-source inventory
+        if: steps.built.outputs.cache-hit != 'true'
+        run: python3 tools/tee/compliance.py
       - name: Integrate shared TEE navigation and regression tests
         if: steps.built.outputs.cache-hit != 'true'
         run: |
@@ -203,7 +206,9 @@ jobs:
         env:
           VERSION: ${{ needs.build.outputs.version }}
           EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
-        run: python3 tools/tee/prepare_release.py
+        run: |
+          python3 tools/tee/prepare_release.py
+          python3 tools/tee/compliance.py release-note
       - name: Publish release with verified assets
         env:
           GH_TOKEN: ${{ github.token }}
