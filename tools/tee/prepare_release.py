@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import re
+import subprocess
+import sys
 import zipfile
 from pathlib import Path
 from urllib.parse import quote
@@ -52,6 +54,7 @@ COPG-VD and TEESimulator-RS integration maintained by wfire06100.
 - Personal keybox import and scheduled XML/base64 downloads.
 - Data migration or initialization with backups and preservation of persistent keys.
 - Shared navigation controller across all six tabs and portable locking for TEE operations.
+- TOPG manager update channel with a release-hosted update manifest and changelog.
 
 ## Installation and limitations
 
@@ -89,7 +92,18 @@ TOPG: wfire06100. COPG/COPG-VD: AlirezaParsi and VD171. Original TEESimulator: J
 
 
 if __name__ == '__main__':
-    archive, checksum, notes = prepare(Path('.').resolve(), Path('release-files').resolve(),
+    from release_changes import release_changes
+    root = Path('.').resolve()
+    subprocess.run([sys.executable, str(root / 'tests/release-changelog.test.py')], check=True)
+    archive, checksum, notes = prepare(root, Path('release-files').resolve(),
         os.environ['VERSION'], os.environ['EXPECTED_SHA256'], os.environ['GITHUB_SHA'], os.environ['GITHUB_REPOSITORY'])
+    with zipfile.ZipFile(archive) as packaged:
+        info = json.loads(packaged.read('build-info.json'))
+    changes = release_changes(root, notes.parent, os.environ['VERSION'], info, os.environ['GITHUB_REPOSITORY'])
+    text = notes.read_text()
+    anchor = '\n## Features\n'
+    if text.count(anchor) != 1:
+        raise ValueError('Release notes insertion anchor changed')
+    notes.write_text(text.replace(anchor, '\n' + changes + anchor, 1))
     with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
         output.write(f'zip={archive}\nchecksum={checksum}\nnotes={notes}\n')
