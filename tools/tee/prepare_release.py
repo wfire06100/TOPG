@@ -44,39 +44,39 @@ def prepare(root, directory, version, expected_digest, source, repository):
     notes = directory / 'RELEASE_NOTES.md'
     text = f'''# TOPG {version}
 
-Intégration de COPG-VD et TEESimulator-RS maintenue par wfire06100.
+COPG-VD and TEESimulator-RS integration maintained by wfire06100.
 
-## Fonctionnalités
+## Features
 
-- Onglet TEE et ciblage des applications en modes Auto, Generate (`!`) ou Hack (`?`).
-- Import de keybox personnelle et téléchargements XML/base64 planifiés.
-- Migration ou initialisation des données avec sauvegardes et conservation des clés persistantes.
-- Contrôleur de navigation commun aux six onglets et verrouillage portable des opérations TEE.
+- Dedicated TEE tab with application targeting in Auto, Generate (`!`), or Hack (`?`) mode.
+- Personal keybox import and scheduled XML/base64 downloads.
+- Data migration or initialization with backups and preservation of persistent keys.
+- Shared navigation controller across all six tabs and portable locking for TEE operations.
 
-## Installation et limites
+## Installation and limitations
 
-Télécharger `{archive_path.name}`, pas les archives de code source GitHub. Sauvegarder les données, suivre les instructions de l'installateur et redémarrer. Android 10 ou plus récent est requis par cette intégration.
+Download `{archive_path.name}`, not GitHub's automatically generated source code archives. Back up your data, follow the installer instructions, and reboot. This integration requires Android 10 or later.
 
-Les tests automatisés et contrôles du ZIP ne certifient pas la compatibilité sur appareil réel. Aucun résultat Play Integrity ou Wallet n'est garanti. Une vérification de structure de keybox ne prouve ni sa validité cryptographique ni sa non-révocation. Le miroir HTTP par défaut n'est pas authentifié.
+Automated tests and ZIP validation do not certify real-device compatibility. No specific Play Integrity or Wallet outcome is guaranteed. Keybox structure validation does not establish cryptographic validity or non-revocation. The default HTTP mirror is not authenticated.
 
-## Informations du build
+## Build information
 
-- Version complète : `{version}` (suffixe conservé).
-- Version code : `{props['versionCode']}`.
-- Commit TOPG : `{source}`.
-- Moteur : TEESimulator-RS `{info['engine']['version']}`.
-- Commit moteur : `{info['engine']['sourceCommit']}`.
-- SHA-256 : `{digest}`.
+- Full version: `{version}` (suffix preserved).
+- Version code: `{props['versionCode']}`.
+- TOPG commit: `{source}`.
+- Engine: TEESimulator-RS `{info['engine']['version']}`.
+- Engine commit: `{info['engine']['sourceCommit']}`.
+- SHA-256: `{digest}`.
 
-## Crédits et licences
+## Credits and licenses
 
-TOPG : wfire06100. COPG/COPG-VD : AlirezaParsi et VD171. TEESimulator original : JingMatrix. TEESimulator-RS : Enginex0 et les contributeurs. Les licences Apache-2.0 et GPL-3.0 et les notices des composants sont conservées.
+TOPG: wfire06100. COPG/COPG-VD: AlirezaParsi and VD171. Original TEESimulator: JingMatrix. TEESimulator-RS: Enginex0 and contributors. Apache-2.0, GPL-3.0, and applicable component license and attribution notices are preserved. See `TOPG-LICENSING.md` in the module for component licensing and corresponding-source locations. These measures are not a legal certification of compliance.
 '''
     photos = sorted(p for p in (root / 'screenshots/topg').glob('*')
                     if p.is_file() and p.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp'))
-    title = 'Captures TOPG'
+    title = 'TOPG screenshots'
     if not photos:
-        title = 'Captures de la base COPG-VD'
+        title = 'COPG-VD base screenshots'
         photos = [root / 'screenshots' / (name + '.png') for name in ('device', 'spoofing', 'system', 'tools')]
         photos = [p for p in photos if p.is_file()]
     if photos:
