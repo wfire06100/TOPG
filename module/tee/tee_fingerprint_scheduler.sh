@@ -28,6 +28,18 @@ save() {
  printf '%s %s\n' "$minutes" "$due" > "$tmp"
  mv -f "$tmp" "$D/fingerprint.schedule"
 }
+update_fingerprint() {
+ before=$(cksum "${D%/tee}/COPG-VD.json" 2>/dev/null || true)
+ if sh "$M/../fingerprint-update.sh" "$1"; then update_rc=0; else update_rc=$?; fi
+ after=$(cksum "${D%/tee}/COPG-VD.json" 2>/dev/null || true)
+ if [ "$before" != "$after" ]; then
+  if ! sh "$M/../service.sh" --props-only; then
+   echo 'status: tee-sync-failed' >&2
+   return 1
+  fi
+ fi
+ return "$update_rc"
+}
 load
 case "$cmd" in
 status)
@@ -40,7 +52,7 @@ configure)
  due=0; [ "$minutes" -eq 0 ] || due=$(( $(date +%s) + minutes * 60 ))
  save ;;
 check|apply)
- sh "$M/../fingerprint-update.sh" "$cmd" ;;
+ update_fingerprint "$cmd" ;;
 tick)
  [ "$minutes" -gt 0 ] || exit 0
  [ "$(getprop sys.boot_completed)" = 1 ] || exit 0
@@ -48,7 +60,7 @@ tick)
  if [ "$due" -gt "$((now + minutes * 60))" ] || [ "$due" -eq 0 ]; then due=$((now + minutes * 60)); save; fi
  [ "$now" -ge "$due" ] || exit 0
  due=$((now + minutes * 60)); save
- if sh "$M/../fingerprint-update.sh" apply; then rc=0; else rc=$?; fi
+ if update_fingerprint apply; then rc=0; else rc=$?; fi
  tmp=$(mktemp "$D/.fingerprint-result.XXXXXX")
  printf 'last=%s\nresult=%s\n' "$now" "$rc" > "$tmp"
  mv -f "$tmp" "$D/fingerprint.result" ;;
