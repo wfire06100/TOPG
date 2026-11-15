@@ -9,11 +9,13 @@ function run(action,value){return new Promise((resolve,reject)=>{
  try{ksu.exec('sh /data/adb/modules/COPG-VD/tee/tee_fingerprint_scheduler.sh '+quote(action)+(value===undefined?'':' '+quote(value)),'{}',cb);}catch(e){delete window[cb];reject(e);}
 });}
 function mount(){
- const panel=document.getElementById('tee-tab');if(!panel)return false;
+ const panel=document.getElementById('tee-tab');
+ const diagnostics=document.getElementById('tee-logs')?.closest('section');
+ if(!panel||panel.dataset.layoutReady!=='1'||!diagnostics||!panel.contains(diagnostics))return false;
  if(document.getElementById('fp-schedule'))return true;
  const box=document.createElement('section');box.id='fp-schedule';box.className='card';box.style.padding='16px';
  box.innerHTML='<h3 data-i18n="fp_title"></h3><label for="fp-minutes" data-i18n="fp_interval"></label> <button type="button" class="info-btn-item" data-info-button aria-label="Info">?</button><input id="fp-minutes" type="number" min="0" max="10080" step="1" value="0" disabled><small data-i18n="fp_hint"></small><p data-state></p><button type="button" class="action-btn" data-save data-i18n="fp_save"></button><pre data-output style="white-space:pre-wrap"></pre><dialog data-help class="card"><p data-i18n="fp_help"></p><button type="button" data-close data-i18n="fp_close"></button></dialog>';
- panel.append(box);I18N.apply(box);
+ diagnostics.before(box);I18N.apply(box);
  const q=s=>box.querySelector(s),input=q('input'),output=q('[data-output]');let busy=false,loaded=false;
  function controls(){input.disabled=busy||!loaded;box.querySelectorAll('button:not([data-info-button]):not([data-close])').forEach(b=>b.disabled=busy||!loaded);}
  async function read(){
@@ -29,6 +31,6 @@ function mount(){
  const dialog=q('[data-help]');q('[data-info-button]').onclick=()=>{I18N.apply(dialog);dialog.showModal();};q('[data-close]').onclick=()=>dialog.close();
  controls();act(read);return true;
 }
-function start(){if(mount())return;const o=new MutationObserver(()=>{if(mount())o.disconnect();});o.observe(document.body,{childList:true,subtree:true});}
+function start(){if(mount())return;const o=new MutationObserver(()=>{if(mount())o.disconnect();});o.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-layout-ready']});}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
 })();
