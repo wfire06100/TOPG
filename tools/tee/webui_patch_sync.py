@@ -6,51 +6,106 @@ import sys
 from pathlib import Path
 from startup_patch import configure_startup
 
-HELPER = r'''async function syncTeeSecurityPatchFromConfig() {
-    const saved = JSON.parse(await execCommand(`cat ${shq(CONFIG_FILE)}`));
+HELPER = r'''async function teeSyncLog(message) {
+    const line = String(message).replace(/[\r\n]+/g, ' ').slice(0, 2048);
+    const script = `set -eu
+umask 077
+L=/data/adb/COPG-VD/update.log
+if [ -f "$L" ] && [ "$(wc -c < "$L")" -gt 32768 ]; then
+    R=$(mktemp "$L.XXXXXX")
+    trap 'rm -f "$R"' EXIT
+    tail -c 8192 "$L" > "$R"
+    cat "$R" > "$L"
+fi
+printf '%s [TEE sync] %s\\n' "$(date '+%Y-%m-%d %H:%M:%S')" ${shq(line)} >> "$L"
+chmod 600 "$L"
+`;
+    try {
+        await execCommand('sh -c ' + shq(script) + ' 2>&1');
+    } catch (error) {
+        throw new Error('TEE log unavailable: ' + String(error && error.message || error));
+    }
+}
+
+async function teeSyncFailure(stage, error) {
+    await teeSyncLog(stage + ' failed: ' + String(error && error.message || error));
+    throw new Error('TEE sync failed at ' + stage);
+}
+
+async function syncTeeSecurityPatchFromConfig() {
+    await teeSyncLog('start');
+    let raw, saved;
+    try {
+        raw = await execCommand(`cat ${shq(CONFIG_FILE)}`);
+    } catch (error) {
+        const code = String(error && error.message || error).match(/error code \d+/i);
+        return await teeSyncFailure('read-config', code ? code[0] : 'read failed; JSON output omitted');
+    }
+    try {
+        saved = JSON.parse(raw);
+    } catch (error) {
+        return await teeSyncFailure('parse-config', 'invalid JSON');
+    }
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) {
+        return await teeSyncFailure('parse-config', 'expected a JSON object');
+    }
     const value = (saved['COPG-VD'] || {}).SECURITY_PATCH;
     let content;
     if (value === undefined || value === null || value === '') {
         content = 'system=prop\n';
     } else {
         if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-            throw new Error('TEE: invalid SECURITY_PATCH; previous configuration preserved');
+            return await teeSyncFailure('validate-patch', 'invalid SECURITY_PATCH');
         }
         const date = new Date(value + 'T00:00:00.000Z');
         if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
-            throw new Error('TEE: invalid SECURITY_PATCH date; previous configuration preserved');
+            return await teeSyncFailure('validate-patch', 'invalid SECURITY_PATCH date');
         }
         content = `system=${value.slice(0, 7).replace('-', '')}\nboot=${value}\nvendor=${value}\n`;
     }
-    return await execCommand(`set -eu
-fail() { printf 'status: tee-patch-sync-failed: %s\n' "$1"; exit 1; }
+    const script = `set -eu
+fail() { rc=$?; [ "$rc" -ne 0 ] || rc=1; printf 'step=%s rc=%s\\n' "$1" "$rc"; exit "$rc"; }
 D=/data/adb/COPG-VD/tee
-[ -d "$D" ] || exit 0
+[ -d "$D" ] || { echo skipped-no-tee-directory; exit 0; }
 umask 077
 T=$(mktemp "$D/.security_patch.XXXXXX") || fail create-temp
 trap 'rc=$?; rm -f "$T"; exit "$rc"' EXIT
 trap 'exit 1' HUP INT TERM
 printf '%s' ${shq(content)} > "$T" || fail write-temp
 if [ -f "$D/security_patch.txt" ] && cmp -s "$T" "$D/security_patch.txt"; then
-    exit 0
+    echo unchanged; exit 0
 fi
 chmod 600 "$T" || fail chmod-temp
 chcon u:object_r:adb_data_file:s0 "$T" || fail selinux-context
 mv -f "$T" "$D/security_patch.txt" || fail replace-patch
-`);
+echo updated
+`;
+    let result;
+    try {
+        result = await execCommand('sh -c ' + shq(script) + ' 2>&1');
+    } catch (error) {
+        return await teeSyncFailure('shell', error);
+    }
+    await teeSyncLog('completed: ' + result.trim());
+    return result;
 }
 
 function reportConfigPostSaveWarning(step, error) {
     const french = (document.documentElement.lang || '').toLowerCase().startsWith('fr');
     const prefix = french ? 'JSON enregistré, mais une étape après sauvegarde a échoué' : 'JSON saved, but a post-save step failed';
-    appendToOutput(prefix + ' (' + step + '): ' + String(error.message || error), 'warning');
+    appendToOutput(prefix + ' (' + step + '): ' + String(error && error.message || error), 'warning');
 }
 
 async function syncTeeSecurityPatchAfterSave() {
     try {
         await syncTeeSecurityPatchFromConfig();
     } catch (error) {
-        reportConfigPostSaveWarning('TEE sync', error);
+        const french = (document.documentElement.lang || '').toLowerCase().startsWith('fr');
+        const logFailed = String(error && error.message || error).startsWith('TEE log unavailable:');
+        const message = logFailed
+            ? (french ? 'Configuration enregistrée. Journal TEE indisponible ; synchronisation non confirmée.' : 'Configuration saved. TEE log unavailable; sync not confirmed.')
+            : (french ? 'Configuration enregistrée. Échec de synchronisation TEE — consulter update.log.' : 'Configuration saved. TEE sync failed — see update.log.');
+        appendToOutput(message, 'warning');
     }
 }
 
@@ -78,7 +133,8 @@ if [ -n "$pids" ]; then kill -9 $pids; fi`);
             await loadConfig();
             renderDeviceList();
             fillIdentityPlate();
-            fetchStatus(t('msg_fetch_fail', {"error": String(error)}), 'error');
+            const french = (document.documentElement.lang || '').toLowerCase().startsWith('fr');
+            fetchStatus(french ? 'Profil récupéré ; synchronisation TEE non confirmée. Consulter update.log (ou vérifier son accès).' : 'Profile fetched; TEE sync not confirmed. See update.log (or check log access).', 'error');
             return;
         }
         await loadConfig();"""),
