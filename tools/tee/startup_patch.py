@@ -34,6 +34,18 @@ def replace_once(source, old, new):
     return source.replace(old, new, 1)
 
 
+def replace_launcher(source):
+    variants = ['exec 9>&-', 'exec 0</dev/null']
+    matches = []
+    for release in variants:
+        old = ' ({}; cd "$M"; sleep 30; exec ./supervisor ./daemon "$M") >> "$D/runtime.log" 2>&1 &'.format(release)
+        matches.extend([(old, release)] * source.count(old))
+    if len(matches) != 1:
+        raise RuntimeError('TEE startup launcher must match exactly one known lock form')
+    old, release = matches[0]
+    return source.replace(old, ' ({}; exec sh "$M/tee_start.sh") >> "$D/runtime.log" 2>&1 &'.format(release), 1)
+
+
 def configure_startup(module):
     module = Path(module)
     manager = module / 'tee/tee_manager.sh'
@@ -49,9 +61,7 @@ def configure_startup(module):
    fi ;;
   esac
  fi''')
-    text = replace_once(text,
-        ' (exec 9>&-; cd "$M"; sleep 30; exec ./supervisor ./daemon "$M") >> "$D/runtime.log" 2>&1 &',
-        ' (exec 9>&-; exec sh "$M/tee_start.sh") >> "$D/runtime.log" 2>&1 &')
+    text = replace_launcher(text)
     service_text = replace_once(service.read_text(),
         'until [ "$(getprop sys.boot_completed)" = "1" ]; do',
         'sh "$MODDIR/tee/tee_manager.sh" boot >> "$DATA_DIR/tee-boot.log" 2>&1\n\nuntil [ "$(getprop sys.boot_completed)" = "1" ]; do')
