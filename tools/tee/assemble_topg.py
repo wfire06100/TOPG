@@ -51,6 +51,7 @@ def assemble(root,engine,upstream,out):
  if out.exists(): raise RuntimeError('Output directory must not exist')
  shutil.copytree(root/'module',out)
  tee=out/'tee'; web=out/'webroot'
+ subprocess.run([sys.executable,str(root/'tools/tee/webui_patch_sync.py'),str(web/'scripts.js')],check=True)
  shutil.copy(engine,tee/'engine.zip')
  with zipfile.ZipFile(engine) as z:
   for src,dst in [('keybox.xml','default-keybox.xml'),('target.txt','default-target.txt')]: (tee/dst).write_bytes(z.read(src))
