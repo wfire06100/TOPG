@@ -4,6 +4,7 @@
 """Stage early TEE startup with a one-second delay and bounded retries."""
 import subprocess
 from pathlib import Path
+from fingerprint_schedule import configure_fingerprint_schedule
 
 WORKER = r'''#!/system/bin/sh
 # Copyright (C) 2026 wfire06100; SPDX-License-Identifier: Apache-2.0
@@ -70,4 +71,5 @@ def configure_startup(module):
     manager.write_text(text)
     service.write_text(service_text)
     (module / 'tee/tee_start.sh').write_text(WORKER)
+    configure_fingerprint_schedule(module)
 
