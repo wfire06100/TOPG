@@ -23,19 +23,35 @@ HELPER = r'''async function syncTeeSecurityPatchFromConfig() {
         content = `system=${value.slice(0, 7).replace('-', '')}\nboot=${value}\nvendor=${value}\n`;
     }
     return await execCommand(`set -eu
+fail() { printf 'status: tee-patch-sync-failed: %s\n' "$1"; exit 1; }
 D=/data/adb/COPG-VD/tee
 [ -d "$D" ] || exit 0
 umask 077
-T=$(mktemp "$D/.security_patch.XXXXXX")
-trap 'rm -f "$T"' EXIT HUP INT TERM
-printf '%s' ${shq(content)} > "$T"
+T=$(mktemp "$D/.security_patch.XXXXXX") || fail create-temp
+trap 'rc=$?; rm -f "$T"; exit "$rc"' EXIT
+trap 'exit 1' HUP INT TERM
+printf '%s' ${shq(content)} > "$T" || fail write-temp
 if [ -f "$D/security_patch.txt" ] && cmp -s "$T" "$D/security_patch.txt"; then
     exit 0
 fi
-chmod 600 "$T"
-chcon u:object_r:adb_data_file:s0 "$T"
-mv -f "$T" "$D/security_patch.txt"
+chmod 600 "$T" || fail chmod-temp
+chcon u:object_r:adb_data_file:s0 "$T" || fail selinux-context
+mv -f "$T" "$D/security_patch.txt" || fail replace-patch
 `);
+}
+
+function reportConfigPostSaveWarning(step, error) {
+    const french = (document.documentElement.lang || '').toLowerCase().startsWith('fr');
+    const prefix = french ? 'JSON enregistré, mais une étape après sauvegarde a échoué' : 'JSON saved, but a post-save step failed';
+    appendToOutput(prefix + ' (' + step + '): ' + String(error.message || error), 'warning');
+}
+
+async function syncTeeSecurityPatchAfterSave() {
+    try {
+        await syncTeeSecurityPatchFromConfig();
+    } catch (error) {
+        reportConfigPostSaveWarning('TEE sync', error);
+    }
 }
 
 '''
@@ -46,7 +62,14 @@ def transform(source):
         ('async function saveConfig() {', HELPER + 'async function saveConfig() {'),
         ('        await execCommand(`chmod 644 ${shq(CONFIG_FILE)}`);',
          '        await execCommand(`chmod 644 ${shq(CONFIG_FILE)}`);\n'
-         '        await syncTeeSecurityPatchFromConfig();'),
+         '        await syncTeeSecurityPatchAfterSave();'),
+        ('        await execCommand(`kill -9 $(pidof com.android.vending com.google.android.gsf com.google.android.gms) 2>/dev/null`);',
+         """        try {
+            await execCommand(`pids=$(pidof com.android.vending com.google.android.gsf com.google.android.gms 2>/dev/null || :)
+if [ -n "$pids" ]; then kill -9 $pids; fi`);
+        } catch (error) {
+            reportConfigPostSaveWarning('Play services restart', error);
+        }"""),
         ("    if (status === 'fetched') {\n        await loadConfig();",
          """    if (status === 'fetched') {
         try {
