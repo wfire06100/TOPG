@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Apply TOPG patch-level synchronization to the staged WebUI."""
+"""Stage WebUI patch synchronization and early TEE startup."""
 import subprocess
 import sys
 from pathlib import Path
+from startup_patch import configure_startup
 
 HELPER = r'''async function syncTeeSecurityPatchFromConfig() {
     const saved = JSON.parse(await execCommand(`cat ${shq(CONFIG_FILE)}`));
@@ -70,5 +71,6 @@ if __name__ == '__main__':
     if len(sys.argv) != 2:
         raise SystemExit('Usage: webui_patch_sync.py SCRIPTS_JS')
     path = Path(sys.argv[1])
+    configure_startup(path.parent.parent)
     path.write_text(transform(path.read_text()))
     subprocess.run(['node', '--check', str(path)], check=True)
