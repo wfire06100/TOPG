@@ -12,7 +12,7 @@ function mount(){
  const panel=document.getElementById('tee-tab');if(!panel)return false;
  if(document.getElementById('fp-schedule'))return true;
  const box=document.createElement('section');box.id='fp-schedule';box.className='card';box.style.padding='16px';
- box.innerHTML='<h3 data-i18n="fp_title"></h3><label for="fp-minutes" data-i18n="fp_interval"></label> <button type="button" class="info-btn-item" data-info-button aria-label="Info">?</button><input id="fp-minutes" type="number" min="0" max="10080" step="1" value="0" disabled><small data-i18n="fp_hint"></small><p data-state></p><button type="button" class="action-btn" data-save data-i18n="fp_save"></button><button type="button" class="action-btn" data-check data-i18n="fp_check"></button><button type="button" class="action-btn" data-update data-i18n="fp_update"></button><button type="button" class="action-btn" data-restart data-i18n="fp_restart"></button><pre data-output style="white-space:pre-wrap"></pre><dialog data-help class="card"><p data-i18n="fp_help"></p><button type="button" data-close data-i18n="fp_close"></button></dialog>';
+ box.innerHTML='<h3 data-i18n="fp_title"></h3><label for="fp-minutes" data-i18n="fp_interval"></label> <button type="button" class="info-btn-item" data-info-button aria-label="Info">?</button><input id="fp-minutes" type="number" min="0" max="10080" step="1" value="0" disabled><small data-i18n="fp_hint"></small><p data-state></p><button type="button" class="action-btn" data-save data-i18n="fp_save"></button><pre data-output style="white-space:pre-wrap"></pre><dialog data-help class="card"><p data-i18n="fp_help"></p><button type="button" data-close data-i18n="fp_close"></button></dialog>';
  panel.append(box);I18N.apply(box);
  const q=s=>box.querySelector(s),input=q('input'),output=q('[data-output]');let busy=false,loaded=false;
  function controls(){input.disabled=busy||!loaded;box.querySelectorAll('button:not([data-info-button]):not([data-close])').forEach(b=>b.disabled=busy||!loaded);}
@@ -26,9 +26,6 @@ function mount(){
  }
  async function act(fn){if(busy)return;busy=true;controls();try{await fn();}catch(e){output.textContent=t('fp_error')+': '+String(e.message||e);}finally{busy=false;controls();}}
  q('[data-save]').onclick=()=>act(async()=>{const n=input.value;if(!/^(0|[1-9]\d*)$/.test(n)||Number(n)>10080)throw new Error(t('fp_invalid'));await run('configure',n);await read();output.textContent=t('fp_saved');});
- q('[data-check]').onclick=()=>act(async()=>{output.textContent=await run('check');});
- q('[data-update]').onclick=()=>act(async()=>{output.textContent=await run('apply');await loadConfig();renderDeviceList();fillIdentityPlate();await read();});
- q('[data-restart]').onclick=()=>act(async()=>{await restartPlayServices();output.textContent=t('fp_restarted');});
  const dialog=q('[data-help]');q('[data-info-button]').onclick=()=>{I18N.apply(dialog);dialog.showModal();};q('[data-close]').onclick=()=>dialog.close();
  controls();act(read);return true;
 }
