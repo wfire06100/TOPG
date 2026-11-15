@@ -14,10 +14,10 @@ function mount(){
  if(!panel||panel.dataset.layoutReady!=='1'||!diagnostics||!panel.contains(diagnostics))return false;
  if(document.getElementById('fp-schedule'))return true;
  const box=document.createElement('section');box.id='fp-schedule';box.className='card';box.style.padding='16px';
- box.innerHTML='<h3 data-i18n="fp_title"></h3><label for="fp-minutes" data-i18n="fp_interval"></label> <button type="button" class="info-btn-item" data-info-button aria-label="Info">?</button><input id="fp-minutes" type="number" min="0" max="10080" step="1" value="0" disabled><small data-i18n="fp_hint"></small><p data-state></p><button type="button" class="action-btn" data-save data-i18n="fp_save"></button><pre data-output style="white-space:pre-wrap"></pre><dialog data-help class="card"><p data-i18n="fp_help"></p><button type="button" data-close data-i18n="fp_close"></button></dialog>';
+ box.innerHTML='<h3 data-i18n="fp_title"></h3><details class="tee-help"><summary data-i18n="ui_info_btn">Info</summary><p data-i18n="fp_help"></p></details><label for="fp-minutes" data-i18n="fp_interval"></label><input id="fp-minutes" type="number" min="0" max="10080" step="1" value="0" disabled><small data-i18n="fp_hint"></small><p data-state></p><button type="button" class="action-btn" data-save data-i18n="fp_save"></button><pre data-output style="white-space:pre-wrap"></pre>';
  diagnostics.before(box);I18N.apply(box);
  const q=s=>box.querySelector(s),input=q('input'),output=q('[data-output]');let busy=false,loaded=false;
- function controls(){input.disabled=busy||!loaded;box.querySelectorAll('button:not([data-info-button]):not([data-close])').forEach(b=>b.disabled=busy||!loaded);}
+ function controls(){input.disabled=busy||!loaded;box.querySelectorAll('button').forEach(b=>b.disabled=busy||!loaded);}
  async function read(){
   const raw=await run('status'),s={};for(const line of raw.split('\n')){const i=line.indexOf('=');if(i>0)s[line.slice(0,i)]=line.slice(i+1);}
   if(!/^\d+$/.test(s.minutes||'')||Number(s.minutes)>10080)throw new Error(t('fp_error'));
@@ -28,7 +28,6 @@ function mount(){
  }
  async function act(fn){if(busy)return;busy=true;controls();try{await fn();}catch(e){output.textContent=t('fp_error')+': '+String(e.message||e);}finally{busy=false;controls();}}
  q('[data-save]').onclick=()=>act(async()=>{const n=input.value;if(!/^(0|[1-9]\d*)$/.test(n)||Number(n)>10080)throw new Error(t('fp_invalid'));await run('configure',n);await read();output.textContent=t('fp_saved');});
- const dialog=q('[data-help]');q('[data-info-button]').onclick=()=>{I18N.apply(dialog);dialog.showModal();};q('[data-close]').onclick=()=>dialog.close();
  controls();act(read);return true;
 }
 function start(){if(mount())return;const o=new MutationObserver(()=>{if(mount())o.disconnect();});o.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-layout-ready']});}
