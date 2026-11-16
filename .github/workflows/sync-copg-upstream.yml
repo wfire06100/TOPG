@@ -63,7 +63,7 @@ jobs:
             echo "base=$base"
           } >> "$GITHUB_OUTPUT"
           printf 'TOPG base: %s\nCOPG release: %s\nCOPG commit: %s\n' "$base" "$tag" "$upstream" > sync-report/revisions.txt
-      - name: Merge into an isolated branch without automatic conflict resolution
+      - name: Merge with explicit TOPG metadata and documentation policies
         id: merge
         shell: bash
         env:
@@ -84,17 +84,31 @@ jobs:
           branch="integration/copg-$TAG-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           backup="backup/pre-copg-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           git check-ref-format "refs/heads/$branch"
+          # Execute the resolver from the trusted TOPG base, not the merged tree.
+          resolver="$RUNNER_TEMP/topg-resolve-upstream.py"
+          git show "$BASE:tools/tee/resolve_upstream.py" > "$resolver"
           git switch -c "$branch"
-          if ! git merge --no-ff --no-commit "$UPSTREAM"; then
+          merge_rc=0
+          git merge --no-ff --no-commit "$UPSTREAM" || merge_rc=$?
+          if [ "$merge_rc" -ne 0 ] && ! git rev-parse --verify -q MERGE_HEAD >/dev/null; then
+            echo 'Merge could not start; main unchanged.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          git diff --name-only --diff-filter=U > sync-report/initial-conflicts.txt
+          if ! python3 "$resolver" "$BASE" "$UPSTREAM" > sync-report/resolver.log 2>&1; then
             git diff --name-only --diff-filter=U > sync-report/conflicts.txt
             git status --short > sync-report/status.txt
             git merge --abort
-            echo 'Merge failed. No branch pushed and main unchanged. See the sync report for conflicts.' | tee -a "$GITHUB_STEP_SUMMARY"
+            echo 'Resolution policy failed; no branch pushed. See resolver.log.' | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          # Keep TOPG automation; upstream CI changes require separate review.
-          git diff --cached --name-status "$BASE" -- .github/workflows > sync-report/upstream-workflows.txt
-          git restore --source="$BASE" --staged --worktree -- .github/workflows
+          git diff --name-only --diff-filter=U > sync-report/conflicts.txt
+          if [ -s sync-report/conflicts.txt ]; then
+            git status --short > sync-report/status.txt
+            git merge --abort
+            echo 'Other conflicts require manual resolution. No branch pushed; main unchanged.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           git diff --cached --stat > sync-report/changes.txt
           git commit -m "merge: integrate COPG-VD $TAG for TOPG testing"
           {
@@ -118,17 +132,16 @@ jobs:
           {
             printf '## COPG-VD %s integration\n\n' "$TAG"
             printf -- '- TOPG base: `%s`\n- COPG commit: `%s`\n- Backup branch: `%s`\n\n' "$BASE" "$UPSTREAM" "$BACKUP"
-            echo 'Prepared by a normal merge. A clean Git merge does not prove runtime compatibility.'
-            echo 'TOPG workflows were retained intentionally. Review sync-report/upstream-workflows.txt for excluded CI changes.'
-            echo 'The existing TOPG build is dispatched separately because PRs created with GITHUB_TOKEN do not trigger the usual PR workflows.'
-            echo 'Manual build dispatch currently resolves the latest TEESimulator-RS release; record its SHA when comparing tests.'
+            echo 'Normal merge with explicit TOPG CI, README and module metadata policies. Other conflicts are never auto-resolved.'
+            echo 'Review sync-report/resolutions.txt and upstream-workflows.txt in the sync artifact. A clean merge does not prove runtime compatibility.'
+            echo 'The build is dispatched separately because PRs created with GITHUB_TOKEN do not trigger usual PR workflows.'
+            echo 'Manual builds currently select the latest TEESimulator-RS release; record its SHA when comparing tests.'
             echo
             echo '## Required validation'
-            echo '- [ ] Review upstream changes and TOPG integration anchors'
-            echo '- [ ] Review excluded upstream workflow changes separately'
+            echo '- [ ] Review upstream changes, resolved metadata/docs and excluded upstream CI'
             echo '- [ ] Integrated TOPG build and regression tests pass'
             echo '- [ ] WebUI saving, TEE sync and update.log checked after reboot'
-            echo '- [ ] Fingerprint scheduler and updater checked'
+            echo '- [ ] Fingerprint scheduler, updater and update channels reviewed'
             echo '- [ ] Keybox/target handling and existing-data migration reviewed'
             echo '- [ ] Phone testing completed before manual merge into main'
           } > sync-report/pr-body.md
@@ -142,7 +155,7 @@ jobs:
         run: |
           set -euo pipefail
           gh workflow run COPG-VD.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
-          echo 'TOPG test build requested on the integration branch. Its status and ZIP are in a separate Actions run; this job does not certify build success.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Test build requested on the integration branch. Its result and ZIP are in a separate Actions run; this job does not certify build success.' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload integration report
         if: always()
         uses: actions/upload-artifact@v4
