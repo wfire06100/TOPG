@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 wfire06100
 # SPDX-License-Identifier: Apache-2.0
-"""Integrate TEE into reviewed legacy and Updates-aware tab controllers."""
+"""Integrate TEE into the reviewed shared tab controller."""
 import hashlib
 import re
 import sys
@@ -50,8 +50,6 @@ SWITCH = r'''function switchTab(tabId, direction = null) {
 REVIEWED = {
     '7fb5f3bb1e8ad2afaebef05c078fe0726e1e43cbff5242a38b817a5a139e0ed3':
         "const tabs = ['about', 'devices', 'spoofing', 'system', 'tools'];",
-    '969b54a4a8855016e22f4dc43c5502f6f0fefe565922b65c98f8e96c64ea856e':
-        "const tabs = ['about', 'devices', 'spoofing', 'system', 'tools', 'updates'];",
 }
 
 
@@ -68,10 +66,6 @@ def apply(root):
         raise RuntimeError('Navigation tab lists changed')
     new_tabs = old_tabs[:-2] + ", 'tee'];"
     replacement = SWITCH.replace("const tabs = ['about', 'devices', 'spoofing', 'system', 'tools', 'tee'];", new_tabs, 1)
-    if "'updates'" in old_tabs:
-        replacement = replacement.replace(
-            "        if (tabId === 'tools') checkRebootPending();",
-            "        if (tabId === 'tools') checkRebootPending();\n        if (tabId === 'updates') mountVdluPanel();", 1)
     source = source[:match.start()] + replacement + source[match.end():]
     source = source.replace(old_tabs, new_tabs, 1)
     content = tee.read_text()

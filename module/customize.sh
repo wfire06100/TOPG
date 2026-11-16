@@ -214,24 +214,6 @@ check_config_file() {
   chcon u:object_r:system_file:s0 "$CONFIG_FILE"
 }
 
-setup_vdlu() {
-  [ -f "$MODPATH/vdlu/update.sh" ] || return 0
-  chmod 0755 "$MODPATH/vdlu/update.sh" "$MODPATH/vdlu/vdlu-verify" 2>/dev/null
-  [ -f "$MODPATH/post-fs-data.sh" ] && chmod 0755 "$MODPATH/post-fs-data.sh" 2>/dev/null
-  # Slim build (Approach B): no bin/ ships. The embedded ed25519-mini verifiers
-  # (all ABIs, ~20KB each) stay so the on-device tree matches the VDLU manifest;
-  # the heavy curl toolchain is fetched into Tier-2 on first use, not bundled.
-  [ -d "$MODPATH/vdlu/verify" ] &&
-    find "$MODPATH/vdlu/verify" -name ed25519-mini -exec chmod 0755 {} + 2>/dev/null
-  VDLU_DIR="$DATA_DIR/vdlu"
-  if [ ! -f "$VDLU_DIR/config" ] && [ -f "$MODPATH/vdlu/config.default" ]; then
-    mkdir -p "$VDLU_DIR"
-    cp -f "$MODPATH/vdlu/config.default" "$VDLU_DIR/config"
-    chmod 0644 "$VDLU_DIR/config"
-    chcon u:object_r:system_file:s0 "$VDLU_DIR/config" 2>/dev/null
-  fi
-}
-
 check_conflict_modules() {
   FOUND=""
   for module in $CONFLICT_MODULES; do
@@ -336,7 +318,6 @@ fi
 check_conflict_modules
 check_config_file
 migrate_version_keys
-setup_vdlu
 
 chmod 0755 "$MODPATH/service.sh"
 chmod 0755 "$MODPATH/fingerprint-update.sh"

@@ -1942,7 +1942,7 @@ function visibleOverlays() {
 }
 
 function currentTabId() {
-    const tabs = ['about', 'devices', 'spoofing', 'system', 'tools', 'updates'];
+    const tabs = ['about', 'devices', 'spoofing', 'system', 'tools'];
     return tabs.find((t) => document.getElementById(`tab-${t}`)?.classList.contains('active'))
         || tabs.find((t) => document.getElementById(`${t}-tab`)?.classList.contains('active'))
         || 'about';
@@ -1965,26 +1965,8 @@ function setupBackNav() {
     });
 }
 
-let vdluPanelMounted = false;
-function setupVdlu() {
-    if (typeof VDLU === 'undefined') return;
-    VDLU.init({
-        moduleDir: '/data/adb/modules/COPG-VD',
-        vdluDir: '/data/adb/COPG-VD/vdlu',
-        modid: 'COPG-VD',
-        module: 'COPG-VD',
-        exec: execCommand
-    });
-    VDLU.onWebUIOpen();
-}
-function mountVdluPanel() {
-    if (vdluPanelMounted || typeof VDLU === 'undefined') return;
-    VDLU.mountUpdatesPanel('vdlu-updates-mount');
-    vdluPanelMounted = true;
-}
-
 function switchTab(tabId, direction = null) {
-    const tabs = ['about', 'devices', 'spoofing', 'system', 'tools', 'updates'];
+    const tabs = ['about', 'devices', 'spoofing', 'system', 'tools'];
     const currentTab = tabs.find(tab => document.getElementById(`${tab}-tab`)?.classList.contains('active'));
     if (currentTab === tabId) return;
     activeOutput = null;
@@ -2021,9 +2003,6 @@ function switchTab(tabId, direction = null) {
         }
         if (tabId === 'tools') {
             checkRebootPending();
-        }
-        if (tabId === 'updates') {
-            mountVdluPanel();
         }
     });
 
@@ -2146,8 +2125,6 @@ function applyEventListeners() {
     });
     document.getElementById('tab-system').addEventListener('click', () => switchTab('system'));
     document.getElementById('tab-tools').addEventListener('click', () => switchTab('tools'));
-    document.getElementById('tab-updates')?.addEventListener('click', () => switchTab('updates'));
-    setupVdlu();
     setupBackNav();
 
     document.querySelectorAll('.close-btn, .cancel-btn').forEach(btn => btn.addEventListener('click', () => {

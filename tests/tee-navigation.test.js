@@ -4,8 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('module/webroot/scripts.js', 'utf8');
-const hasUpdates = source.includes("'tools', 'updates'");
-const tabs = ['about', 'devices', 'spoofing', 'system', 'tools', ...(hasUpdates ? ['updates'] : []), 'tee'];
+const tabs = ['about', 'devices', 'spoofing', 'system', 'tools', 'tee'];
 function extract(name) {
  const start = source.indexOf('function '+name+'(');
  assert.notEqual(start,-1,name+' missing');
@@ -24,13 +23,13 @@ function fixture() {
  }
  for(const id of tabs){nodes.set(id+'-tab',node(id==='about'));nodes.set('tab-'+id,node(id==='about'));}
  nodes.set('device-savebar',node());
- const calls={devices:0,tools:0,updates:0};
+ const calls={devices:0,tools:0};
  const context={activeOutput:null,navFromPop:false,
   document:{getElementById:id=>nodes.get(id)||null,
    querySelectorAll:()=>tabs.map(id=>nodes.get('tab-'+id)).filter(n=>n.classList.contains('active'))},
   requestAnimationFrame(fn){const id=++sequence;frames.set(id,fn);return id;},
   cancelAnimationFrame:id=>frames.delete(id),setTimeout:fn=>fn(),
-  renderDeviceList:()=>calls.devices++,checkRebootPending:()=>calls.tools++,mountVdluPanel:()=>calls.updates++,visibleOverlays:()=>[],
+  renderDeviceList:()=>calls.devices++,checkRebootPending:()=>calls.tools++,visibleOverlays:()=>[],
   window:{addEventListener:(name,fn)=>listeners[name]=fn},
   history:{pushState:state=>pushes.push(state.tab),replaceState:()=>{}}};
  vm.createContext(context);
@@ -58,20 +57,14 @@ if(process.argv.includes('--expect-bug')){
  console.log('PASS baseline: original controller leaves TEE active below another panel.');
 }else{
  for(const from of tabs)for(const to of tabs){const f=fixture();f.context.switchTab(from);f.flush();f.context.switchTab(to);f.flush();check(f,to);}
- const fast=fixture();for(const id of ['tools',...(hasUpdates?['updates']:[]),'tee','devices','system','tee'])fast.context.switchTab(id);
- assert.equal(fast.frames.size,1);fast.flush();check(fast,'tee');assert.equal(fast.calls.updates,0);
+ const fast=fixture();for(const id of ['tools','tee','devices','system','tee'])fast.context.switchTab(id);
+ assert.equal(fast.frames.size,1);fast.flush();check(fast,'tee');
  const back=fixture();back.context.setupBackNav();back.context.switchTab('tee');back.flush();
  const count=back.pushes.length;back.listeners.popstate({state:{tab:'tools'}});back.flush();check(back,'tools');
  assert.equal(back.pushes.length,count);back.listeners.popstate({state:{tab:'tee'}});back.flush();check(back,'tee');
  assert.equal(back.pushes.length,count);
- if(hasUpdates){
-  back.listeners.popstate({state:{tab:'updates'}});back.flush();check(back,'updates');assert.equal(back.pushes.length,count);assert.equal(back.calls.updates,1);
-  const u=fixture();u.context.switchTab('updates');u.flush();check(u,'updates');assert.equal(u.calls.updates,1);
-  u.context.switchTab('updates');u.flush();assert.equal(u.calls.updates,1);
-  u.context.switchTab('tee');u.flush();check(u,'tee');u.context.switchTab('updates');u.flush();check(u,'updates');assert.equal(u.calls.updates,2);
- }
  const callback=fs.readFileSync('module/webroot/tee/tee.js','utf8');
  assert.ok(callback.includes("btn.addEventListener('click',()=>{switchTab('tee');act(status);});"));
  assert.ok(!callback.includes('stopImmediatePropagation'));
- console.log('PASS: '+tabs.length*tabs.length+' tab pairs; rapid transitions; back navigation; single visible panel; draft retained; unified TEE handler; Updates callback preserved when present.');
+ console.log('PASS: '+tabs.length*tabs.length+' tab pairs; rapid transitions; back navigation; single visible panel; draft retained; unified TEE handler.');
 }
