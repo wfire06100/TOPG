@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: integration/copg-v6.13-vd-43856574245-1
       - name: Remove updater, UI and installation hooks
         run: |
           python3 - <<'PY'
