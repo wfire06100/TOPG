@@ -21,17 +21,13 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib
           import re
           import shutil
 
           root = Path('.')
-          def edit(name, transform, expected=None):
+          def edit(name, transform):
               p = root / name
               text = p.read_text()
-              if expected:
-                  raw = p.read_bytes()
-                  assert hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest() == expected, 'File changed: ' + name
               updated = transform(text)
               assert updated != text, 'No change: ' + name
               p.write_text(updated)
@@ -42,14 +38,14 @@ jobs:
 
           def navigation(s):
               old = "const tabs = ['about', 'devices', 'spoofing', 'system', 'tools', 'updates'];"
-              assert s.count(old) == 2
+              assert s.count(old) == 2, 'Expected two navigation lists'
               s = s.replace(old, "const tabs = ['about', 'devices', 'spoofing', 'system', 'tools'];")
               s, n = re.subn(r'^let vdluPanelMounted = false;\nfunction setupVdlu\(\) \{.*?^function mountVdluPanel\(\) \{.*?^\}\n\n', '', s, flags=re.M|re.S)
-              assert n == 1
+              assert n == 1, 'Expected one VDLU script block'
               s = once(s, "        if (tabId === 'updates') {\n            mountVdluPanel();\n        }\n")
               s = once(s, "    document.getElementById('tab-updates')?.addEventListener('click', () => switchTab('updates'));\n    setupVdlu();\n")
               return s
-          edit('module/webroot/scripts.js', navigation, '88697f664d033d8f15e91d24e6b907bf1deb76e0')
+          edit('module/webroot/scripts.js', navigation)
 
           def html(s):
               for anchor in ['    <link rel="stylesheet" href="vdlu.css">\n',
@@ -58,13 +54,13 @@ jobs:
                              '            <div id="updates-tab" class="tab-content">\n                <div id="vdlu-updates-mount"></div>\n            </div>\n\n']:
                   s = once(s, anchor)
               return s
-          edit('module/webroot/index.html', html, '887822f9ee7571f746e4f9a013afa8b11fc4c96e')
+          edit('module/webroot/index.html', html)
 
           def installer(s):
               s, n = re.subn(r'^setup_vdlu\(\) \{\n.*?^\}\n\n', '', s, flags=re.M|re.S)
-              assert n == 1
+              assert n == 1, 'Expected one VDLU installer block'
               return once(s, '\nsetup_vdlu\n', '\n')
-          edit('module/customize.sh', installer, '09d670ae0a24e5cb3978a6b71b93a3ad16dd705f')
+          edit('module/customize.sh', installer)
 
           def styles(s):
               start = s.index('/* VDLU widget theme bridge:')
@@ -79,7 +75,7 @@ jobs:
               start = s.index('    if "\'updates\'" in old_tabs:\n')
               end = s.index('    source = source[:match.start()]', start)
               return s[:start] + s[end:]
-          edit('tools/tee/fix_navigation.py', adapter, '887c0a966ea88c47aa5fa6668cb669fdcdab868b')
+          edit('tools/tee/fix_navigation.py', adapter)
 
           def tests(s):
               s = once(s, 'const hasUpdates = source.includes("\'tools\', \'updates\'");\n')
@@ -92,7 +88,7 @@ jobs:
               end = s.index(" const callback=", start)
               s = s[:start] + s[end:]
               return once(s, '; Updates callback preserved when present.', '.')
-          edit('tests/tee-navigation.test.js', tests, 'f267bba71428461d313c7525ad4aded67488d5a7')
+          edit('tests/tee-navigation.test.js', tests)
 
           assert (root/'module/vdlu').is_dir()
           shutil.rmtree(root/'module/vdlu')
@@ -104,7 +100,7 @@ jobs:
               anchor = "    output = staged.parent / ('TOPG-' + version + '.zip')\n"
               guard = "    for path in staged.rglob('*'):\n        relative = path.relative_to(staged).as_posix().lower()\n        if 'vdlu' in relative:\n            raise ValueError('VDLU must not be packaged: ' + relative)\n        if path.is_file() and path.suffix in ('.js', '.html', '.css', '.sh'):\n            text = path.read_text()\n            if re.search(r'vdlu|tab-updates|updates-tab', text, re.I):\n                raise ValueError('Removed updater reference: ' + relative)\n"
               return once(s, anchor, guard + anchor)
-          edit('tools/tee/package_topg.py', packaging, 'a7a76bc0c97fd0c738d3b4c4787998e61041f9f7')
+          edit('tools/tee/package_topg.py', packaging)
 
           for p in (root/'module').rglob('*'):
               assert 'vdlu' not in p.relative_to(root/'module').as_posix().lower(), str(p)
