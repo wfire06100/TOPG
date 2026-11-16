@@ -40,6 +40,15 @@ def configure_startup(module):
     original_startup(module)
     module = Path(module)
     updates = {}
+    installer = module / 'customize.sh'
+    cleanup = '''# Remove only retired TEE logs; preserve the shared update.log.
+if ! rm -f "$DATA_DIR/tee/fingerprint.log" "$DATA_DIR/tee/update.log"; then
+  ui_print " ! Could not remove retired TEE logs"
+fi
+'''
+    updates[installer] = once(installer.read_text(),
+        '\nprint_empty_line\nprint_box_start\nui_print " ✅ Module Successfully Installed "',
+        '\n' + cleanup + '\nprint_empty_line\nprint_box_start\nui_print " ✅ Module Successfully Installed "')
     updater = module / 'fingerprint-update.sh'
     text = updater.read_text()
     begin = text.index('log() {\n')
