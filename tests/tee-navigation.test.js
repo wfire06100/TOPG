@@ -66,5 +66,5 @@ if(process.argv.includes('--expect-bug')){
  const callback=fs.readFileSync('module/webroot/tee/tee.js','utf8');
  assert.ok(callback.includes("btn.addEventListener('click',()=>{switchTab('tee');act(status);});"));
  assert.ok(!callback.includes('stopImmediatePropagation'));
- console.log('PASS: 36 tab pairs; rapid transitions; back navigation; single visible panel; draft retained; unified TEE handler.');
+ console.log('PASS: '+tabs.length*tabs.length+' tab pairs; rapid transitions; back navigation; single visible panel; draft retained; unified TEE handler.');
 }

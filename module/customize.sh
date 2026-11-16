@@ -1,6 +1,6 @@
 # ======================================================================
 #  COPG-VD  ::  global device spoofer
-#  Spoof your device fingerprint and build - Zygisk, KernelSU/APatch/Magisk.
+#  Spoof your device fingerprint and build: Zygisk, KernelSU/APatch/Magisk.
 #
 #  Copyright (C) 2026  AlirezaParsi & VD171
 #  SPDX-License-Identifier: Apache-2.0
@@ -26,6 +26,12 @@ DATA_DIR="/data/adb/COPG-VD"
 CONFIG_FILE="$DATA_DIR/COPG-VD.json"
 LEGACY_JSON="/data/adb/COPG-VD.json"
 CONFLICT_MODULES="COPG playintegrity playintegrityfix [i][n][t][e][g][r][i][t][y][-]*[b][o][x]"
+
+# Headless/commandline mode: resolve the volume prompts to their default without the
+# hardware key wait. On when a marker/env is set, or when `timeout` is missing (then the
+# getevent prompt cannot be time-boxed and would block forever).
+CLI_MODE=false
+{ [ -f /data/local/tmp/.copgvd_cli ] || [ -n "$COPGVD_CLI" ] || ! command -v timeout >/dev/null 2>&1; } && CLI_MODE=true
 
 print_box_start() {
   ui_print "╔═════════════════════════════════╗"
@@ -87,6 +93,13 @@ prompt_gphoto_spoof() {
   ui_print " ➤ Volume Up: Yes (Recommended)  "
   ui_print " ➤ Volume Down: No               "
   print_box_end
+
+  if $CLI_MODE; then
+    [ -n "$COPGVD_GPHOTO" ] && ENABLE_GPHOTO_SPOOF="$COPGVD_GPHOTO"
+    [ -f /data/local/tmp/.copgvd_gphoto ] && ENABLE_GPHOTO_SPOOF="$(cat /data/local/tmp/.copgvd_gphoto 2>/dev/null || echo false)"
+    ui_print " ⌨ CLI mode: Google Photos spoof = $ENABLE_GPHOTO_SPOOF"
+    return
+  fi
 
   TIMEOUT=10
   START_TIME=$(date +%s)
@@ -221,6 +234,21 @@ check_conflict_modules() {
   ui_print " ➤ Volume Up: Uninstall all them. "
   ui_print " ➤ Volume Down: Do it after. "
   print_box_end
+
+  if $CLI_MODE; then
+    if [ -n "$COPGVD_CONFLICT_UNINSTALL" ]; then
+      ui_print " ⌨ CLI mode: uninstalling conflicting modules"
+      for found in $FOUND; do
+        touch "$found/disable"
+        touch "$found/remove"
+      done
+      return
+    fi
+    ui_print " ⌨ CLI mode: conflicting modules present - aborting"
+    ui_print "   (uninstall them first, or set COPGVD_CONFLICT_UNINSTALL=1)"
+    print_failure_and_exit
+    return
+  fi
 
   TIMEOUT=10
   START_TIME=$(date +%s)

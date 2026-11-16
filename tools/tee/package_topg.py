@@ -97,6 +97,14 @@ def package(root, staged, run, attempt, engine_sha, source_sha):
     for name in required:
         if not (staged / name).is_file() or not (staged / name).stat().st_size:
             raise ValueError('Missing module member: ' + name)
+    for path in staged.rglob('*'):
+        relative = path.relative_to(staged).as_posix().lower()
+        if 'vdlu' in relative:
+            raise ValueError('VDLU must not be packaged: ' + relative)
+        if path.is_file() and path.suffix in ('.js', '.html', '.css', '.sh'):
+            text = path.read_text()
+            if re.search(r'vdlu|tab-updates|updates-tab', text, re.I):
+                raise ValueError('Removed updater reference: ' + relative)
     output = staged.parent / ('TOPG-' + version + '.zip')
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(staged.rglob('*')):

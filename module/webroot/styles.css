@@ -1,7 +1,7 @@
 /*
  * ======================================================================
  *  COPG-VD  ::  global device spoofer
- *  Spoof your device fingerprint and build - Zygisk, KernelSU/APatch/Magisk.
+ *  Spoof your device fingerprint and build: Zygisk, KernelSU/APatch/Magisk.
  *
  *  Copyright (C) 2026  AlirezaParsi & VD171
  *  SPDX-License-Identifier: Apache-2.0
@@ -904,3 +904,4 @@ body.dark-theme .version-select {
 .about-lbl { font-size: 12px; color: var(--muted); }
 .about-val { font-size: 15px; font-weight: 500; color: var(--ink); word-break: break-word; }
 .about-row.link .about-val { color: var(--accent); }
+.about-trademarks { margin: 18px 4px 4px; font-size: 0.72rem; line-height: 1.5; color: var(--muted); }

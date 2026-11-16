@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # ======================================================================
 #  COPG-VD  ::  global device spoofer
-#  Spoof your device fingerprint and build - Zygisk, KernelSU/APatch/Magisk.
+#  Spoof your device fingerprint and build: Zygisk, KernelSU/APatch/Magisk.
 #
 #  Copyright (C) 2026  VD171
 #  SPDX-License-Identifier: Apache-2.0
@@ -608,6 +608,184 @@ fetch_remote() {
     return 0
 }
 
+extract_latest_from_index() {
+    _index_file="$1"
+    _device="$2"
+    _channel="$3"
+
+    normalize_json "$_index_file" | $AWK -v dev="$_device" -v chan="$_channel" '
+    BEGIN { in_dev=0; in_chan=0; depth=0 }
+    {
+        line = $0
+        if (line ~ "\"" dev "\"[ \t]*:[ \t]*\\{") {
+            in_dev = 1
+            depth = 1
+            next
+        }
+        if (in_dev) {
+            n_open = gsub(/\{/, "{", line)
+            n_close = gsub(/\}/, "}", line)
+            depth += n_open - n_close
+
+            if (line ~ "\"" chan "\"[ \t]*:[ \t]*\\{") {
+                in_chan = 1
+            }
+
+            if (in_chan) {
+                if (match(line, /"latest"[ \t]*:[ \t]*"[^"]*"/)) {
+                    s = substr(line, RSTART, RLENGTH)
+                    sub(/.*:[ \t]*"/, "", s)
+                    sub(/"$/, "", s)
+                    print s
+                    exit
+                }
+                if (depth == 1) in_chan = 0
+            }
+
+            if (depth <= 0) exit
+        }
+    }'
+}
+
+latest_prop() {
+    device="$1"
+    channel="$2"
+
+    DOWNLOADER=$(find_downloader) || return 1
+    idx_tmp="$TMP_FILE.idx"
+    _url="$FETCH_BASE_URL/index.json"
+
+    download_to "$_url" "$idx_tmp" || {
+        log "could not download index.json" >&2
+        return 1
+    }
+
+    file=$(extract_latest_from_index "$idx_tmp" "$device" "$channel")
+    rm -f "$idx_tmp"
+
+    if [ -z "$file" ]; then
+        log "no $device profile found for channel '$channel' in index.json" >&2
+        return 1
+    fi
+
+    printf '%s\n' "$file"
+}
+
+detect_channel_from_fingerprint() {
+    conf=""
+    for p in $CONFIG_PATHS; do [ -f "$p" ] && conf="$p" && break; done
+    [ -f "$conf" ] || return 1
+    fp=$(json_get "$conf" FINGERPRINT | tr '[:upper:]' '[:lower:]')
+    preview=$(json_get "$conf" PREVIEW_SDK)
+    case "$fp" in */*/*:*/*/*:*) ;; *) return 1 ;; esac
+    release=${fp#*:}; release=${release%%/*}
+    case "$release" in
+        *canary*|*preview*) echo canary; return ;;
+    esac
+    case "$fp" in
+        *canary*|*preview*) echo canary; return ;;
+        *beta*) echo beta; return ;;
+    esac
+    case "$preview" in ''|0) ;; *) return 1 ;; esac
+    case "$release" in ''|*[!0-9.]*) return 1 ;; esac
+    echo release
+}
+
+update_non_tegu_profile() {
+    device="$1"
+
+    if [ -n "$FORCED_CHANNEL" ] && [ "$FORCED_CHANNEL" != "auto" ]; then
+        channel="$FORCED_CHANNEL"
+        log "channel: $channel (forced by argument)" >&2
+    else
+        channel=$(detect_channel_from_fingerprint) || { log "channel ambiguous; select a profile explicitly" >&2; return 1; }
+        log "channel: $channel (auto-detected)" >&2
+    fi
+
+    relpath="$(latest_prop "$device" "$channel")" || return 1
+    remote_incremental="$(printf '%s' "$relpath" | sed 's/.*_//; s/\.prop$//')"
+
+    local_reference=""
+    for path in $CONFIG_PATHS; do
+        [ -f "$path" ] && local_reference="$path" && break
+    done
+
+    if [ -z "$local_reference" ]; then
+        log "no local config to update" >&2
+        return 1
+    fi
+
+    local_incremental="$(json_get "$local_reference" INCREMENTAL)"
+    local_id="$(json_get "$local_reference" ID)"
+    local_ts="$(json_get "$local_reference" TIMESTAMP)"
+
+    log "local:  $device incremental $local_incremental id $local_id ts $local_ts" >&2
+    log "remote: $device incremental $remote_incremental" >&2
+
+    case "$local_incremental$remote_incremental" in
+        *[!0-9]*|"")
+            log "non-numeric incremental, refusing to guess which build is newer" >&2
+            return 1
+            ;;
+    esac
+
+    # CORRIGÉ : Si le distant est inférieur OU ÉGAL, on arrête.
+    if [ "$remote_incremental" -le "$local_incremental" ]; then
+        log "upstream is not newer than what is installed, nothing applied" >&2
+        return 2  # Code 2 = déjà à jour
+    fi
+
+    # Retourne le chemin pour que le script principal fasse le fetch/apply
+    printf '%s\n' "$relpath"
+    return 0
+}
+
+# Fonction pour appliquer un profil téléchargé
+apply_profile() {
+    relpath="$1"
+
+    if fetch_output=$(sh "$0" fetch "$relpath"); then
+        fetch_rc=0
+    else
+        fetch_rc=$?
+    fi
+    printf '%s\n' "$fetch_output" | sed '/^status:/d'
+    if [ "$fetch_rc" -ne 0 ]; then
+        log "profile fetch failed rc=$fetch_rc" >&2
+        return 1
+    fi
+    if ! printf '%s\n' "$fetch_output" | grep -qx 'status: fetched'; then
+        log "profile fetch returned no success status" >&2
+        return 1
+    fi
+
+    if [ "$(cfg_setting resetprop)" = false ]; then
+        log "resetprop is disabled, props not re-applied" >&2
+    elif [ -f "$MODDIR/service.sh" ]; then
+        sh "$MODDIR/service.sh" --props-only >/dev/null 2>&1 &&
+            log "props re-applied" || log "could not re-apply props" >&2
+    fi
+
+    for package in $KILL_PACKAGES; do
+        pid=$(pidof "$package" 2>/dev/null)
+        [ -n "$pid" ] && kill -9 $pid 2>/dev/null
+    done
+
+    log "attestation processes killed: $KILL_PACKAGES" >&2
+    log "reboot to apply the new build to android.os.Build" >&2
+    return 0
+}
+
+spoofed_device() {
+    device=""
+    for path in $CONFIG_PATHS; do
+        [ -f "$path" ] || continue
+        device="$(json_get "$path" DEVICE)"
+        [ -n "$device" ] && break
+    done
+    printf '%s\n' "$device"
+}
+
 compare() {
     TARGETS=$(existing_targets)
     [ -n "$TARGETS" ] || { log "no config file found in: $CONFIG_PATHS"; return 3; }
@@ -699,10 +877,96 @@ mark_ran_this_boot() {
     chmod 0600 "$STATE_FILE" 2>/dev/null
 }
 
+# --- device-aware update (issue #28) --------------------------------------
+# A profile fetched from VictorGabriel7Dev/build.prop (any Pixel other than the
+# bundled example) could never update: the updater only knew the example profile,
+# so compare() returned "skipped-custom-device" and the user was stuck. Resolve the
+# newest .prop for the device the config actually carries, from the build.prop
+# index, and refresh that device instead of forcing the bundled one.
+index_field() {
+    # <index_file> <device> <channel> <field> -> value on stdout; rc 1 if absent
+    $AWK -v dev="\"$2\":" -v chan="\"$3\":" -v fld="\"$4\":" '
+        { s = s $0 "\n" }
+        END {
+            di = index(s, dev); if (!di) exit 1
+            s = substr(s, di + length(dev)); depth = 0; obj = ""
+            for (i = 1; i <= length(s); i++) {
+                c = substr(s, i, 1); obj = obj c
+                if (c == "{") depth++
+                else if (c == "}") { if (--depth == 0) break }
+            }
+            ci = index(obj, chan); if (!ci) exit 1
+            t = substr(obj, ci + length(chan)); ce = index(t, "}"); t = substr(t, 1, ce)
+            fi = index(t, fld); if (!fi) exit 1
+            v = substr(t, fi + length(fld)); sub(/^[ \t]*/, "", v)
+            if (substr(v, 1, 1) == "\"") { v = substr(v, 2); q = index(v, "\""); print substr(v, 1, q - 1) }
+            else { match(v, /[0-9A-Za-z._-]+/); print substr(v, RSTART, RLENGTH) }
+            exit 0
+        }' "$1"
+}
+
+fetched_device_update() {
+    # uses $REFERENCE (set by compare); sets DEV_LATEST/DEV_LINCR/DEV_RINCR on rc 0.
+    # rc: 0 newer available, 1 already newest, 2 not a build.prop device, 3 no network
+    [ -n "$AWK" ] || return 2
+    _dev=$(json_get "$REFERENCE" DEVICE); [ -n "$_dev" ] || return 2
+    case "$_dev" in *[!A-Za-z0-9_-]*) return 2 ;; esac
+    _src=$(json_get "$REFERENCE" "Strings extracted from")
+    case "$_src" in *_beta_*|*beta/*) _chan=beta ;; *) _chan=release ;; esac
+    DOWNLOADER="${DOWNLOADER:-$(find_downloader)}"; [ -n "$DOWNLOADER" ] || return 3
+    _idx="$TMP_FILE.idx"
+    download_to "$FETCH_BASE_URL/index.json" "$_idx" || { rm -f "$_idx"; return 3; }
+    DEV_LATEST=$(index_field "$_idx" "$_dev" "$_chan" latest)
+    DEV_RINCR=$(index_field "$_idx" "$_dev" "$_chan" incremental)
+    rm -f "$_idx"
+    [ -n "$DEV_LATEST" ] && [ -n "$DEV_RINCR" ] || return 2
+    case "$DEV_LATEST" in */*.prop) : ;; *) return 2 ;; esac
+    DEV_LINCR=$(json_get "$REFERENCE" INCREMENTAL)
+    case "$DEV_LINCR$DEV_RINCR" in *[!0-9]*|"") return 1 ;; esac
+    [ "$DEV_RINCR" -le "$DEV_LINCR" ] && return 1
+    return 0
+}
+
 MODE="${1:-check}"
+FORCED_CHANNEL="${2:-auto}"
+case "$MODE" in
+ check|apply|boot)
+  case "$FORCED_CHANNEL" in auto|release|beta|canary) ;; *) echo 'status: invalid-channel'; exit 1;; esac ;;
+esac
 
 case "$MODE" in
     check|apply)
+        SPOOFED_DEVICE="$(spoofed_device)"
+
+        if [ -n "$SPOOFED_DEVICE" ] && [ "$SPOOFED_DEVICE" != "tegu" ]; then
+            # On récupère le chemin distant (ou un code d'erreur)
+            relpath_or_status="$(update_non_tegu_profile "$SPOOFED_DEVICE")"
+            ret=$?
+
+            if [ "$ret" -eq 2 ]; then
+                log "already on the newest build"
+                echo "status: up-to-date"
+                exit 0
+            elif [ "$ret" -ne 0 ]; then
+                echo "status: failed"
+                exit 1
+            fi
+
+            # Si on est en mode check, on affiche juste la dispo
+            if [ "$MODE" = "check" ]; then
+                log "update available: $relpath_or_status"
+                echo "status: update-available"
+                exit 0
+            fi
+
+            # Mode apply : on télécharge et applique
+            log "update available, fetching..."
+            apply_profile "$relpath_or_status" || { echo "status: failed"; exit 1; }
+            echo "status: applied"
+            exit 0
+        fi
+
+        # Pour tegu ou si pas d'appareil spécifique
         fetch_remote || { echo "status: failed"; exit 1; }
         compare
         case $? in
@@ -732,6 +996,36 @@ case "$MODE" in
         [ "$(cfg_setting autoupdate)" = false ] && exit 0
         wait_for_boot
         already_ran_this_boot && exit 0
+
+        SPOOFED_DEVICE="$(spoofed_device)"
+
+        if [ -n "$SPOOFED_DEVICE" ] && [ "$SPOOFED_DEVICE" != tegu ]; then
+            attempt=1
+            while [ "$attempt" -le "$BOOT_RETRY_MAX" ]; do
+                relpath_or_status="$(update_non_tegu_profile "$SPOOFED_DEVICE")"
+                ret=$?
+                success=false
+                if [ "$ret" -eq 2 ]; then
+                    log "already on the newest build"
+                    success=true
+                elif [ "$ret" -eq 0 ]; then
+                    if apply_profile "$relpath_or_status"; then success=true; fi
+                fi
+                if "$success"; then
+                    mark_ran_this_boot
+                    echo "ok $(date '+%Y-%m-%d %H:%M')" > "$STATUS_FILE"
+                    chmod 0600 "$STATUS_FILE" 2>/dev/null
+                    exit 0
+                fi
+                attempt=$((attempt + 1))
+                [ "$attempt" -gt "$BOOT_RETRY_MAX" ] || sleep "$BOOT_RETRY_SLEEP"
+            done
+            log "profile update failed after $BOOT_RETRY_MAX attempts"
+            echo "failed $(date '+%Y-%m-%d %H:%M')" > "$STATUS_FILE"
+            chmod 0600 "$STATUS_FILE" 2>/dev/null
+            exit 1
+        fi
+
         attempt=1
         while [ "$attempt" -le "$BOOT_RETRY_MAX" ]; do
             if fetch_remote; then

@@ -1,7 +1,49 @@
+// Presentation only: backend diagnostics and status tokens remain unchanged.
+function formatUpdaterMessage(message, status = '') {
+    if (status === 'up-to-date' && message === 'already on the newest build') return null;
+    if (!(document.documentElement.lang || '').toLowerCase().startsWith('fr')) return message;
+    const exact = {
+        'Updating COPG-VD.json from GitHub...': 'Mise à jour du profil depuis GitHub…',
+        'Checking GitHub for a newer build...': 'Recherche d’une version plus récente sur GitHub…',
+        'Analyzing the config as it stands...': 'Analyse de la configuration actuelle…',
+        'Running the updater...': 'Exécution de la mise à jour…',
+        'already on the newest build': 'Le profil est déjà à jour.',
+        'upstream is not newer than what is installed, nothing applied': 'La version distante n’est pas plus récente ; aucune modification.',
+        'update available, fetching...': 'Nouvelle version disponible, téléchargement…',
+        'props re-applied': 'Propriétés système réappliquées.',
+        'could not re-apply props': 'Impossible de réappliquer les propriétés système.',
+        'resetprop is disabled, props not re-applied': 'Resetprop est désactivé ; propriétés système non réappliquées.',
+        'reboot to apply the new build to android.os.Build': 'Redémarrez pour appliquer le nouveau profil à android.os.Build.',
+        'channel ambiguous; select a profile explicitly': 'Canal indéterminé ; sélectionnez explicitement un profil.',
+        'profile fetch returned no success status': 'La récupération du profil n’a pas confirmé sa réussite.',
+        'no local config to update': 'Aucune configuration locale à mettre à jour.',
+        'non-numeric incremental, refusing to guess which build is newer': 'Numéro incrémental invalide ; comparaison des versions impossible.',
+        'could not download index.json': 'Impossible de télécharger index.json.'
+    };
+    if (Object.prototype.hasOwnProperty.call(exact, message)) return exact[message];
+    const patterns = [
+        [/^channel: (.+) \(auto-detected\)$/, (_, channel) => `Canal : ${channel} (détection automatique)`],
+        [/^channel: (.+) \(forced by argument\)$/, (_, channel) => `Canal : ${channel} (sélection explicite)`],
+        [/^local:\s*(\S+) incremental (\S*) id (\S*) ts (\S*)$/, (_, device, incremental, id, ts) => `Profil local : ${device} — incrément : ${incremental}, ID : ${id}, horodatage : ${ts}`],
+        [/^remote:\s*(\S+) incremental (\S*)$/, (_, device, incremental) => `Profil distant : ${device} — incrément : ${incremental}`],
+        [/^local:\s*(.*)$/, (_, value) => `Profil local : ${value}`],
+        [/^remote:\s*(.*)$/, (_, value) => `Profil distant : ${value}`],
+        [/^update available: (.*)$/, (_, value) => `Mise à jour disponible : ${value}`],
+        [/^fetched (.*) from (.*)$/, (_, profile, path) => `Profil récupéré : ${profile} — source : ${path}`],
+        [/^attestation processes killed: (.*)$/, (_, packages) => `Processus d’attestation arrêtés : ${packages}`],
+        [/^profile fetch failed rc=(\d+)$/, (_, code) => `Échec de récupération du profil (code ${code}).`],
+        [/^no (.+) profile found for channel '(.+)' in index.json$/, (_, device, channel) => `Aucun profil ${device} pour le canal ${channel} dans index.json.`]
+    ];
+    for (const [pattern, replace] of patterns) {
+        if (pattern.test(message)) return message.replace(pattern, replace);
+    }
+    return message;
+}
+
 /*
  * ======================================================================
  *  COPG-VD  ::  global device spoofer
- *  Spoof your device fingerprint and build - Zygisk, KernelSU/APatch/Magisk.
+ *  Spoof your device fingerprint and build: Zygisk, KernelSU/APatch/Magisk.
  *
  *  Copyright (C) 2026  AlirezaParsi & VD171
  *  SPDX-License-Identifier: Apache-2.0
@@ -868,10 +910,8 @@ async function readSetting(key) {
 async function loadToggleStates() {
     try {
         const resetpropToggle = document.getElementById('toggle-resetprop');
-        const roproductmanufacturerToggle = document.getElementById('toggle-ro-product-manufacturer');
         const autoupdateToggle = document.getElementById('toggle-autoupdate');
         resetpropToggle.checked = (await readSetting('resetprop')) !== 'false';
-        roproductmanufacturerToggle.checked = (await readSetting('spoof_manufacturer')) !== 'false';
         autoupdateToggle.checked = (await readSetting('autoupdate')) !== 'false';
         const st = (await execCommand("cat /data/adb/COPG-VD/update.status 2>/dev/null")).trim();
         const su = document.getElementById('autoupdate-status');
@@ -1816,10 +1856,10 @@ async function loadVersionPolicy() {
 async function runUpdater(mode) {
     const script = '/data/adb/modules/COPG-VD/fingerprint-update.sh';
     appendToOutput({
-        apply: 'Updating COPG-VD.json from GitHub...',
-        check: 'Checking GitHub for a newer build...',
-        analyze: 'Analyzing the config as it stands...'
-    }[mode] || 'Running the updater...', 'info');
+        apply: formatUpdaterMessage('Updating COPG-VD.json from GitHub...'),
+        check: formatUpdaterMessage('Checking GitHub for a newer build...'),
+        analyze: formatUpdaterMessage('Analyzing the config as it stands...')
+    }[mode] || formatUpdaterMessage('Running the updater...'), 'info');
 
     let output;
     try {
@@ -1830,9 +1870,11 @@ async function runUpdater(mode) {
     }
 
     const lines = output.split('\n').map(line => line.trim()).filter(Boolean);
-    lines.filter(line => line.startsWith('[COPG-VD]'))
-         .forEach(line => appendToOutput(line.replace('[COPG-VD] ', ''), 'info'));
     const status = (lines.find(line => line.startsWith('status:')) || '').replace('status:', '').trim();
+    lines.filter(line => line.startsWith('[COPG-VD]')).forEach(line => {
+        const message = formatUpdaterMessage(line.replace('[COPG-VD] ', ''), status);
+        if (message !== null) appendToOutput(message, 'info');
+    });
 
     switch (status) {
         case 'up-to-date':
@@ -2044,17 +2086,6 @@ function applyEventListeners() {
             e.target.checked = !isChecked;
         }
     });
-    document.getElementById('toggle-ro-product-manufacturer').addEventListener('click', async (e) => {
-        const isChecked = e.target.checked;
-        try {
-            await writeSetting('spoof_manufacturer', isChecked);
-            appendToOutput(isChecked ? "Ro.Product.Manufacturer Enabled. Reboot to see changes" : "Ro.Product.Manufacturer Disabled. Reboot to see changes", isChecked ? 'success' : 'error');
-        } catch (error) {
-            appendToOutput(t('msg_082', {"error": error}), 'error');
-            e.target.checked = !isChecked;
-        }
-    });
-
     document.getElementById('analyze-config').addEventListener('click', async (e) => {
         e.target.classList.add('loading');
         activeOutput = openToolOutput('output-analyze');
@@ -2180,7 +2211,7 @@ const LANG_NAMES = {
     hi: "\u0939\u093f\u0928\u094d\u0926\u0940", in: "Bahasa Indonesia", it: "Italiano",
     ja: "\u65e5\u672c\u8a9e", ko: "\ud55c\uad6d\uc5b4", nl: "Nederlands", pl: "Polski",
     pt: "Portugu\u00eas", ru: "\u0420\u0443\u0441\u0441\u043a\u0438\u0439", sv: "Svenska",
-    th: "\u0e44\u0e17\u0e22", tr: "T\u00fcrk\u00e7e", vi: "Ti\u1ebfng Vi\u1ec7t", zh: "\u4e2d\u6587"
+    th: "\u0e44\u0e17\u0e22", tr: "T\u00fcrk\u00e7e", uk: "\u0423\u043a\u0440\u0430\u0457\u043d\u0441\u044c\u043a\u0430", vi: "Ti\u1ebfng Vi\u1ec7t", zh: "\u4e2d\u6587"
 };
 
 function setupLanguageSelector() {
