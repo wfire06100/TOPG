@@ -608,6 +608,178 @@ fetch_remote() {
     return 0
 }
 
+extract_latest_from_index() {
+    _index_file="$1"
+    _device="$2"
+    _channel="$3"
+
+    normalize_json "$_index_file" | $AWK -v dev="$_device" -v chan="$_channel" '
+    BEGIN { in_dev=0; in_chan=0; depth=0 }
+    {
+        line = $0
+        if (line ~ "\"" dev "\"[ \t]*:[ \t]*\\{") {
+            in_dev = 1
+            depth = 1
+            next
+        }
+        if (in_dev) {
+            n_open = gsub(/\{/, "{", line)
+            n_close = gsub(/\}/, "}", line)
+            depth += n_open - n_close
+
+            if (line ~ "\"" chan "\"[ \t]*:[ \t]*\\{") {
+                in_chan = 1
+            }
+
+            if (in_chan) {
+                if (match(line, /"latest"[ \t]*:[ \t]*"[^"]*"/)) {
+                    s = substr(line, RSTART, RLENGTH)
+                    sub(/.*:[ \t]*"/, "", s)
+                    sub(/"$/, "", s)
+                    print s
+                    exit
+                }
+                if (depth == 1) in_chan = 0
+            }
+
+            if (depth <= 0) exit
+        }
+    }'
+}
+
+latest_prop() {
+    device="$1"
+    channel="$2"
+
+    DOWNLOADER=$(find_downloader) || return 1
+    idx_tmp="$TMP_FILE.idx"
+    _url="$FETCH_BASE_URL/index.json"
+
+    download_to "$_url" "$idx_tmp" || {
+        log "could not download index.json" >&2
+        return 1
+    }
+
+    file=$(extract_latest_from_index "$idx_tmp" "$device" "$channel")
+    rm -f "$idx_tmp"
+
+    if [ -z "$file" ]; then
+        log "no $device profile found for channel '$channel' in index.json" >&2
+        return 1
+    fi
+
+    printf '%s\n' "$file"
+}
+
+detect_channel_from_fingerprint() {
+    conf=""
+    for p in $CONFIG_PATHS; do [ -f "$p" ] && conf="$p" && break; done
+    [ -f "$conf" ] || { echo "release"; return; }
+
+    fp="$(json_get "$conf" FINGERPRINT)"
+    preview=$(json_get "$conf" PREVIEW_SDK)
+
+    case "$fp" in
+        *canary*|*preview*) echo canary; return ;;
+        *beta*) echo beta; return ;;
+    esac
+    # Si PREVIEW_SDK est présent et supérieur à 0, c'est Canary/Preview
+    if [ -n "$preview" ] && [ "$preview" -gt 0 ] 2>/dev/null; then
+        echo "canary"
+        return
+    fi
+
+    # Sinon on regarde le fingerprint pour "beta" ou "canary"
+    case "$fp" in
+        *beta*) echo "beta" ;;
+        *canary*|*preview*|*"userdebug"*|*"eng"*) echo "canary" ;;
+        *) echo "release" ;;
+    esac
+}
+
+# CORRIGÉ : Cette fonction ne fait plus l'apply elle-même, elle retourne juste le chemin distant
+update_non_tegu_profile() {
+    device="$1"
+
+    if [ -n "$FORCED_CHANNEL" ] && [ "$FORCED_CHANNEL" != "auto" ]; then
+        channel="$FORCED_CHANNEL"
+        log "channel: $channel (forced by argument)" >&2
+    else
+        channel=$(detect_channel_from_fingerprint)
+        log "channel: $channel (auto-detected)" >&2
+    fi
+
+    relpath="$(latest_prop "$device" "$channel")" || return 1
+    remote_incremental="$(printf '%s' "$relpath" | sed 's/.*_//; s/\.prop$//')"
+
+    local_reference=""
+    for path in $CONFIG_PATHS; do
+        [ -f "$path" ] && local_reference="$path" && break
+    done
+
+    if [ -z "$local_reference" ]; then
+        log "no local config to update" >&2
+        return 1
+    fi
+
+    local_incremental="$(json_get "$local_reference" INCREMENTAL)"
+    local_id="$(json_get "$local_reference" ID)"
+    local_ts="$(json_get "$local_reference" TIMESTAMP)"
+
+    log "local:  $device incremental $local_incremental id $local_id ts $local_ts" >&2
+    log "remote: $device incremental $remote_incremental" >&2
+
+    case "$local_incremental$remote_incremental" in
+        *[!0-9]*|"")
+            log "non-numeric incremental, refusing to guess which build is newer" >&2
+            return 1
+            ;;
+    esac
+
+    # CORRIGÉ : Si le distant est inférieur OU ÉGAL, on arrête.
+    if [ "$remote_incremental" -le "$local_incremental" ]; then
+        log "upstream is not newer than what is installed, nothing applied" >&2
+        return 2  # Code 2 = déjà à jour
+    fi
+
+    # Retourne le chemin pour que le script principal fasse le fetch/apply
+    printf '%s\n' "$relpath"
+    return 0
+}
+
+# Fonction pour appliquer un profil téléchargé
+apply_profile() {
+    relpath="$1"
+
+    sh "$0" fetch "$relpath" || return 1
+
+    if [ "$(cfg_setting resetprop)" = false ]; then
+        log "resetprop is disabled, props not re-applied" >&2
+    elif [ -f "$MODDIR/service.sh" ]; then
+        sh "$MODDIR/service.sh" --props-only >/dev/null 2>&1 &&
+            log "props re-applied" || log "could not re-apply props" >&2
+    fi
+
+    for package in $KILL_PACKAGES; do
+        pid=$(pidof "$package" 2>/dev/null)
+        [ -n "$pid" ] && kill -9 $pid 2>/dev/null
+    done
+
+    log "attestation processes killed: $KILL_PACKAGES" >&2
+    log "reboot to apply the new build to android.os.Build" >&2
+    return 0
+}
+
+spoofed_device() {
+    device=""
+    for path in $CONFIG_PATHS; do
+        [ -f "$path" ] || continue
+        device="$(json_get "$path" DEVICE)"
+        [ -n "$device" ] && break
+    done
+    printf '%s\n' "$device"
+}
+
 compare() {
     TARGETS=$(existing_targets)
     [ -n "$TARGETS" ] || { log "no config file found in: $CONFIG_PATHS"; return 3; }
@@ -750,32 +922,51 @@ fetched_device_update() {
 }
 
 MODE="${1:-check}"
+FORCED_CHANNEL="${2:-auto}"
+case "$MODE" in
+ check|apply|boot)
+  case "$FORCED_CHANNEL" in auto|release|beta|canary) ;; *) echo 'status: invalid-channel'; exit 1;; esac ;;
+esac
 
 case "$MODE" in
     check|apply)
+        SPOOFED_DEVICE="$(spoofed_device)"
+
+        if [ -n "$SPOOFED_DEVICE" ] && [ "$SPOOFED_DEVICE" != "tegu" ]; then
+            # On récupère le chemin distant (ou un code d'erreur)
+            relpath_or_status="$(update_non_tegu_profile "$SPOOFED_DEVICE")"
+            ret=$?
+
+            if [ "$ret" -eq 2 ]; then
+                log "already on the newest build"
+                echo "status: up-to-date"
+                exit 0
+            elif [ "$ret" -ne 0 ]; then
+                echo "status: failed"
+                exit 1
+            fi
+
+            # Si on est en mode check, on affiche juste la dispo
+            if [ "$MODE" = "check" ]; then
+                log "update available: $relpath_or_status"
+                echo "status: update-available"
+                exit 0
+            fi
+
+            # Mode apply : on télécharge et applique
+            log "update available, fetching..."
+            apply_profile "$relpath_or_status" || { echo "status: failed"; exit 1; }
+            echo "status: applied"
+            exit 0
+        fi
+
+        # Pour tegu ou si pas d'appareil spécifique
         fetch_remote || { echo "status: failed"; exit 1; }
         compare
         case $? in
             1) log "already on the newest build"; echo "status: up-to-date"; exit 0 ;;
-            2) fetched_device_update
-               case $? in
-                   0) if [ "$MODE" = "check" ]; then
-                          log "update available for $_dev: $DEV_LINCR -> $DEV_RINCR"
-                          echo "status: update-available"; exit 0
-                      fi
-                      if sh "$0" fetch "$DEV_LATEST" >/dev/null 2>&1; then
-                          [ "$(cfg_setting resetprop)" != false ] && [ -f "$MODDIR/service.sh" ] &&
-                              sh "$MODDIR/service.sh" --props-only >/dev/null 2>&1
-                          log "refreshed $_dev to the newest build ($DEV_RINCR)"
-                          echo "status: applied"; exit 0
-                      fi
-                      echo "status: failed"; exit 1 ;;
-                   1) log "fetched device already on the newest build"
-                      echo "status: up-to-date"; exit 0 ;;
-                   3) echo "status: failed"; exit 1 ;;
-                   *) log "this is not an upstream build.prop device, nothing applied"
-                      echo "status: skipped-custom-device"; exit 0 ;;
-               esac ;;
+            2) log "this is not the upstream device profile, nothing applied"
+               echo "status: skipped-custom-device"; exit 0 ;;
             3) echo "status: no-config"; exit 1 ;;
             4) log "upstream ($REMOTE_ID) is not newer than what is installed ($LOCAL_ID)"
                echo "status: local-newer"; exit 0 ;;
@@ -799,6 +990,36 @@ case "$MODE" in
         [ "$(cfg_setting autoupdate)" = false ] && exit 0
         wait_for_boot
         already_ran_this_boot && exit 0
+
+        SPOOFED_DEVICE="$(spoofed_device)"
+
+        if [ -n "$SPOOFED_DEVICE" ] && [ "$SPOOFED_DEVICE" != tegu ]; then
+            attempt=1
+            while [ "$attempt" -le "$BOOT_RETRY_MAX" ]; do
+                relpath_or_status="$(update_non_tegu_profile "$SPOOFED_DEVICE")"
+                ret=$?
+                success=false
+                if [ "$ret" -eq 2 ]; then
+                    log "already on the newest build"
+                    success=true
+                elif [ "$ret" -eq 0 ]; then
+                    if apply_profile "$relpath_or_status"; then success=true; fi
+                fi
+                if "$success"; then
+                    mark_ran_this_boot
+                    echo "ok $(date '+%Y-%m-%d %H:%M')" > "$STATUS_FILE"
+                    chmod 0600 "$STATUS_FILE" 2>/dev/null
+                    exit 0
+                fi
+                attempt=$((attempt + 1))
+                [ "$attempt" -gt "$BOOT_RETRY_MAX" ] || sleep "$BOOT_RETRY_SLEEP"
+            done
+            log "profile update failed after $BOOT_RETRY_MAX attempts"
+            echo "failed $(date '+%Y-%m-%d %H:%M')" > "$STATUS_FILE"
+            chmod 0600 "$STATUS_FILE" 2>/dev/null
+            exit 1
+        fi
+
         attempt=1
         while [ "$attempt" -le "$BOOT_RETRY_MAX" ]; do
             if fetch_remote; then
@@ -809,16 +1030,7 @@ case "$MODE" in
                        if [ "$A_RED" -eq 0 ]; then apply
                        else log "config file is broken - not updating on top of it"; fi ;;
                     1) log "already on the newest build" ;;
-                    2) fetched_device_update
-                       case $? in
-                           0) if sh "$0" fetch "$DEV_LATEST" >/dev/null 2>&1; then
-                                  [ "$(cfg_setting resetprop)" != false ] && [ -f "$MODDIR/service.sh" ] &&
-                                      sh "$MODDIR/service.sh" --props-only >/dev/null 2>&1
-                                  log "refreshed $_dev to the newest build ($DEV_RINCR)"
-                              else log "failed to refresh $_dev"; fi ;;
-                           1) log "fetched device already on the newest build" ;;
-                           *) log "this is not an upstream build.prop device, nothing applied" ;;
-                       esac ;;
+                    2) log "this is not the upstream device profile, nothing applied" ;;
                     3) log "no config file to update" ;;
                     4) log "upstream is not newer than what is installed, nothing applied" ;;
                 esac
