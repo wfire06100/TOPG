@@ -107,7 +107,7 @@ jobs:
               if p.is_file() and p.suffix in ('.js', '.html', '.css', '.sh'):
                   assert not re.search(r'vdlu|tab-updates|updates-tab', p.read_text(), re.I), str(p)
           assert (root/'module/fingerprint-update.sh').is_file()
-          assert (root/'module/tee/tee_scheduler.sh').is_file()
+          assert (root/'module/tee/tee_fingerprint_scheduler.sh').is_file()
           (root/'.github/workflows/remove-vdlu-once.yml').unlink()
           PY
       - name: Check syntax and navigation on an isolated copy
