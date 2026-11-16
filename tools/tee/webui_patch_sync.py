@@ -4,21 +4,13 @@
 import subprocess
 import sys
 from pathlib import Path
-from startup_patch import configure_startup
+from centralized_logging import configure_startup
 
 HELPER = r'''async function teeSyncLog(message) {
     const line = String(message).replace(/[\r\n]+/g, ' ').slice(0, 2048);
     const script = `set -eu
-umask 077
-L=/data/adb/COPG-VD/update.log
-if [ -f "$L" ] && [ "$(wc -c < "$L")" -gt 32768 ]; then
-    R=$(mktemp "$L.XXXXXX")
-    trap 'rm -f "$R"' EXIT
-    tail -c 8192 "$L" > "$R"
-    cat "$R" > "$L"
-fi
-printf '%s [TEE sync] %s\\n' "$(date '+%Y-%m-%d %H:%M:%S')" ${shq(line)} >> "$L"
-chmod 600 "$L"
+. /data/adb/modules/COPG-VD/tee/topg_log.sh
+topg_log tee_sync ${shq(line)}
 `;
     try {
         await execCommand('sh -c ' + shq(script) + ' 2>&1');
