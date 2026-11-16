@@ -1,0 +1,153 @@
+name: Prepare COPG upstream integration
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Published COPG-VD release tag, or latest'
+        required: true
+        default: latest
+        type: string
+      build_test:
+        description: 'Dispatch the existing TOPG build on the integration branch'
+        default: true
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: topg-copg-upstream-integration
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.repository == 'wfire06100/TOPG' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REQUESTED_TAG: ${{ inputs.upstream_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve published release and fetch its exact commit
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sync-report
+          if [[ "$REQUESTED_TAG" != latest && ! "$REQUESTED_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$ ]]; then
+            echo 'Invalid release tag'; exit 1
+          fi
+          if [[ "$REQUESTED_TAG" == latest ]]; then
+            gh api repos/VD171/COPG-VD/releases/latest > sync-report/release.json
+          else
+            gh api "repos/VD171/COPG-VD/releases/tags/$REQUESTED_TAG" > sync-report/release.json
+          fi
+          tag=$(jq -er 'select(.draft == false and .prerelease == false) | .tag_name' sync-report/release.json)
+          [[ "$tag" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$ ]] || exit 1
+          git config core.hooksPath /dev/null
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add copg-upstream https://github.com/VD171/COPG-VD.git
+          git fetch --no-tags copg-upstream "refs/tags/$tag:refs/tags/copg-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          upstream=$(git rev-parse "refs/tags/copg-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT^{commit}")
+          base=$(git rev-parse HEAD)
+          {
+            echo "tag=$tag"
+            echo "upstream=$upstream"
+            echo "base=$base"
+          } >> "$GITHUB_OUTPUT"
+          printf 'TOPG base: %s\nCOPG release: %s\nCOPG commit: %s\n' "$base" "$tag" "$upstream" > sync-report/revisions.txt
+      - name: Merge into an isolated branch without automatic conflict resolution
+        id: merge
+        shell: bash
+        env:
+          TAG: ${{ steps.upstream.outputs.tag }}
+          UPSTREAM: ${{ steps.upstream.outputs.upstream }}
+          BASE: ${{ steps.upstream.outputs.base }}
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor "$UPSTREAM" HEAD; then
+            echo 'This release is already integrated.' | tee -a "$GITHUB_STEP_SUMMARY"
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git merge-base HEAD "$UPSTREAM" > sync-report/merge-base.txt; then
+            echo 'No common ancestor; refusing an unrelated-history merge.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          branch="integration/copg-$TAG-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          backup="backup/pre-copg-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          git check-ref-format "refs/heads/$branch"
+          git switch -c "$branch"
+          if ! git merge --no-ff --no-commit "$UPSTREAM"; then
+            git diff --name-only --diff-filter=U > sync-report/conflicts.txt
+            git status --short > sync-report/status.txt
+            git merge --abort
+            echo 'Merge failed. No branch pushed and main unchanged. See the sync report for conflicts.' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # Keep TOPG automation; upstream CI changes require separate review.
+          git diff --cached --name-status "$BASE" -- .github/workflows > sync-report/upstream-workflows.txt
+          git restore --source="$BASE" --staged --worktree -- .github/workflows
+          git diff --cached --stat > sync-report/changes.txt
+          git commit -m "merge: integrate COPG-VD $TAG for TOPG testing"
+          {
+            echo 'changed=true'
+            echo "branch=$branch"
+            echo "backup=$backup"
+          } >> "$GITHUB_OUTPUT"
+      - name: Push backup and integration branch, then open draft PR
+        if: steps.merge.outputs.changed == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.upstream.outputs.tag }}
+          UPSTREAM: ${{ steps.upstream.outputs.upstream }}
+          BASE: ${{ steps.upstream.outputs.base }}
+          BRANCH: ${{ steps.merge.outputs.branch }}
+          BACKUP: ${{ steps.merge.outputs.backup }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          git push --atomic origin "$BASE:refs/heads/$BACKUP" "HEAD:refs/heads/$BRANCH"
+          {
+            printf '## COPG-VD %s integration\n\n' "$TAG"
+            printf -- '- TOPG base: `%s`\n- COPG commit: `%s`\n- Backup branch: `%s`\n\n' "$BASE" "$UPSTREAM" "$BACKUP"
+            echo 'Prepared by a normal merge. A clean Git merge does not prove runtime compatibility.'
+            echo 'TOPG workflows were retained intentionally. Review sync-report/upstream-workflows.txt for excluded CI changes.'
+            echo 'The existing TOPG build is dispatched separately because PRs created with GITHUB_TOKEN do not trigger the usual PR workflows.'
+            echo 'Manual build dispatch currently resolves the latest TEESimulator-RS release; record its SHA when comparing tests.'
+            echo
+            echo '## Required validation'
+            echo '- [ ] Review upstream changes and TOPG integration anchors'
+            echo '- [ ] Review excluded upstream workflow changes separately'
+            echo '- [ ] Integrated TOPG build and regression tests pass'
+            echo '- [ ] WebUI saving, TEE sync and update.log checked after reboot'
+            echo '- [ ] Fingerprint scheduler and updater checked'
+            echo '- [ ] Keybox/target handling and existing-data migration reviewed'
+            echo '- [ ] Phone testing completed before manual merge into main'
+          } > sync-report/pr-body.md
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --draft --title "Integrate COPG-VD $TAG into TOPG" --body-file sync-report/pr-body.md | tee -a "$GITHUB_STEP_SUMMARY"
+          printf '\nBackup: `%s`\nIntegration: `%s`\n' "$BACKUP" "$BRANCH" >> "$GITHUB_STEP_SUMMARY"
+      - name: Dispatch TOPG test build without publishing a stable release
+        if: steps.merge.outputs.changed == 'true' && inputs.build_test
+        shell: bash
+        env:
+          BRANCH: ${{ steps.merge.outputs.branch }}
+        run: |
+          set -euo pipefail
+          gh workflow run COPG-VD.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          echo 'TOPG test build requested on the integration branch. Its status and ZIP are in a separate Actions run; this job does not certify build success.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload integration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: copg-upstream-sync-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sync-report/
+          if-no-files-found: ignore
+          retention-days: 14
