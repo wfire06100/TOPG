@@ -57,7 +57,7 @@ jobs:
           trap 'rm -rf "$sandbox"' EXIT
           cp -a module tests "$sandbox/"
           python3 tools/tee/webui_patch_sync.py "$sandbox/module/webroot/scripts.js"
-          python3 tools/tee/fix_navigation.py "$sandbox/module/webroot/scripts.js"
+          python3 tools/tee/fix_navigation.py "$sandbox"
           git diff --check
       - name: Commit only localized WebUI
         run: |
