@@ -1,0 +1,144 @@
+name: Remove VDLU from integration once
+on:
+  push:
+    branches: ['integration/copg-v6.13-vd-43856574245-1']
+    paths: ['.github/workflows/remove-vdlu-once.yml']
+permissions:
+  contents: write
+concurrency:
+  group: remove-vdlu-integration
+  cancel-in-progress: false
+jobs:
+  remove:
+    if: github.repository == 'wfire06100/TOPG' && github.ref == 'refs/heads/integration/copg-v6.13-vd-43856574245-1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Remove updater, UI and installation hooks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import re
+          import shutil
+
+          root = Path('.')
+          def edit(name, transform, expected=None):
+              p = root / name
+              text = p.read_text()
+              if expected:
+                  raw = p.read_bytes()
+                  assert hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest() == expected, 'File changed: ' + name
+              updated = transform(text)
+              assert updated != text, 'No change: ' + name
+              p.write_text(updated)
+
+          def once(text, old, new=''):
+              assert text.count(old) == 1, 'Anchor changed: ' + old[:100]
+              return text.replace(old, new, 1)
+
+          def navigation(s):
+              old = "const tabs = ['about', 'devices', 'spoofing', 'system', 'tools', 'updates'];"
+              assert s.count(old) == 2
+              s = s.replace(old, "const tabs = ['about', 'devices', 'spoofing', 'system', 'tools'];")
+              s, n = re.subn(r'^let vdluPanelMounted = false;\nfunction setupVdlu\(\) \{.*?^function mountVdluPanel\(\) \{.*?^\}\n\n', '', s, flags=re.M|re.S)
+              assert n == 1
+              s = once(s, "        if (tabId === 'updates') {\n            mountVdluPanel();\n        }\n")
+              s = once(s, "    document.getElementById('tab-updates')?.addEventListener('click', () => switchTab('updates'));\n    setupVdlu();\n")
+              return s
+          edit('module/webroot/scripts.js', navigation, '88697f664d033d8f15e91d24e6b907bf1deb76e0')
+
+          def html(s):
+              for anchor in ['    <link rel="stylesheet" href="vdlu.css">\n',
+                             '    <script src="vdlu.js"></script>\n',
+                             '            <button id="tab-updates" class="tab-btn">Updates</button>\n',
+                             '            <div id="updates-tab" class="tab-content">\n                <div id="vdlu-updates-mount"></div>\n            </div>\n\n']:
+                  s = once(s, anchor)
+              return s
+          edit('module/webroot/index.html', html, '887822f9ee7571f746e4f9a013afa8b11fc4c96e')
+
+          def installer(s):
+              s, n = re.subn(r'^setup_vdlu\(\) \{\n.*?^\}\n\n', '', s, flags=re.M|re.S)
+              assert n == 1
+              return once(s, '\nsetup_vdlu\n', '\n')
+          edit('module/customize.sh', installer, '09d670ae0a24e5cb3978a6b71b93a3ad16dd705f')
+
+          def styles(s):
+              start = s.index('/* VDLU widget theme bridge:')
+              assert s[start:].count('{') == 1 and s[start:].count('}') == 1, 'Review CSS suffix'
+              assert s[start:].rstrip().endswith('}')
+              return s[:start].rstrip() + '\n'
+          edit('module/webroot/styles.css', styles)
+
+          def adapter(s):
+              s = once(s, 'Integrate TEE into reviewed legacy and Updates-aware tab controllers.', 'Integrate TEE into the reviewed shared tab controller.')
+              s = once(s, "    '969b54a4a8855016e22f4dc43c5502f6f0fefe565922b65c98f8e96c64ea856e':\n        \"const tabs = ['about', 'devices', 'spoofing', 'system', 'tools', 'updates'];\",\n")
+              start = s.index('    if "\'updates\'" in old_tabs:\n')
+              end = s.index('    source = source[:match.start()]', start)
+              return s[:start] + s[end:]
+          edit('tools/tee/fix_navigation.py', adapter, '887c0a966ea88c47aa5fa6668cb669fdcdab868b')
+
+          def tests(s):
+              s = once(s, 'const hasUpdates = source.includes("\'tools\', \'updates\'");\n')
+              s = once(s, "...(hasUpdates ? ['updates'] : []), ")
+              s = once(s, 'const calls={devices:0,tools:0,updates:0};', 'const calls={devices:0,tools:0};')
+              s = once(s, 'mountVdluPanel:()=>calls.updates++,')
+              s = once(s, "...(hasUpdates?['updates']:[]),")
+              s = once(s, 'assert.equal(fast.calls.updates,0);')
+              start = s.index(' if(hasUpdates){\n')
+              end = s.index(" const callback=", start)
+              s = s[:start] + s[end:]
+              return once(s, '; Updates callback preserved when present.', '.')
+          edit('tests/tee-navigation.test.js', tests, 'f267bba71428461d313c7525ad4aded67488d5a7')
+
+          assert (root/'module/vdlu').is_dir()
+          shutil.rmtree(root/'module/vdlu')
+          for name in ['module/post-fs-data.sh', 'module/webroot/vdlu.js', 'module/webroot/vdlu.css']:
+              (root/name).unlink()
+
+          # Refuse a future ZIP if an upstream merge reintroduces the removed updater.
+          def packaging(s):
+              anchor = "    output = staged.parent / ('TOPG-' + version + '.zip')\n"
+              guard = "    for path in staged.rglob('*'):\n        relative = path.relative_to(staged).as_posix().lower()\n        if 'vdlu' in relative:\n            raise ValueError('VDLU must not be packaged: ' + relative)\n        if path.is_file() and path.suffix in ('.js', '.html', '.css', '.sh'):\n            text = path.read_text()\n            if re.search(r'vdlu|tab-updates|updates-tab', text, re.I):\n                raise ValueError('Removed updater reference: ' + relative)\n"
+              return once(s, anchor, guard + anchor)
+          edit('tools/tee/package_topg.py', packaging, 'a7a76bc0c97fd0c738d3b4c4787998e61041f9f7')
+
+          for p in (root/'module').rglob('*'):
+              assert 'vdlu' not in p.relative_to(root/'module').as_posix().lower(), str(p)
+              if p.is_file() and p.suffix in ('.js', '.html', '.css', '.sh'):
+                  assert not re.search(r'vdlu|tab-updates|updates-tab', p.read_text(), re.I), str(p)
+          assert (root/'module/fingerprint-update.sh').is_file()
+          assert (root/'module/tee/tee_scheduler.sh').is_file()
+          (root/'.github/workflows/remove-vdlu-once.yml').unlink()
+          PY
+      - name: Check syntax and navigation on an isolated copy
+        run: |
+          set -eu
+          python3 -m py_compile tools/tee/fix_navigation.py tools/tee/package_topg.py
+          sh -n module/customize.sh
+          sh -n module/service.sh
+          node --check module/webroot/scripts.js
+          node --check tests/tee-navigation.test.js
+          sandbox=$(mktemp -d)
+          trap 'rm -rf "$sandbox"' EXIT
+          cp -a module tools tests "$sandbox/"
+          (
+            cd "$sandbox"
+            node tests/tee-navigation.test.js --expect-bug
+            python3 tools/tee/fix_navigation.py
+            node --check module/webroot/scripts.js
+            node --check module/webroot/tee/tee.js
+            node tests/tee-navigation.test.js
+          )
+          git diff --check
+      - name: Commit removal only to integration
+        run: |
+          set -eu
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -u -- module tools/tee/fix_navigation.py tools/tee/package_topg.py tests/tee-navigation.test.js .github/workflows/remove-vdlu-once.yml
+          git commit -m 'remove(webui): drop VDLU and Updates panel'
+          git push origin HEAD:refs/heads/integration/copg-v6.13-vd-43856574245-1
