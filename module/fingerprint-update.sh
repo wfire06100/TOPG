@@ -674,30 +674,23 @@ latest_prop() {
 detect_channel_from_fingerprint() {
     conf=""
     for p in $CONFIG_PATHS; do [ -f "$p" ] && conf="$p" && break; done
-    [ -f "$conf" ] || { echo "release"; return; }
-
-    fp="$(json_get "$conf" FINGERPRINT)"
+    [ -f "$conf" ] || return 1
+    fp=$(json_get "$conf" FINGERPRINT | tr '[:upper:]' '[:lower:]')
     preview=$(json_get "$conf" PREVIEW_SDK)
-
+    case "$fp" in */*/*:*/*/*:*) ;; *) return 1 ;; esac
+    release=${fp#*:}; release=${release%%/*}
+    case "$release" in
+        *canary*|*preview*) echo canary; return ;;
+    esac
     case "$fp" in
         *canary*|*preview*) echo canary; return ;;
         *beta*) echo beta; return ;;
     esac
-    # Si PREVIEW_SDK est présent et supérieur à 0, c'est Canary/Preview
-    if [ -n "$preview" ] && [ "$preview" -gt 0 ] 2>/dev/null; then
-        echo "canary"
-        return
-    fi
-
-    # Sinon on regarde le fingerprint pour "beta" ou "canary"
-    case "$fp" in
-        *beta*) echo "beta" ;;
-        *canary*|*preview*|*"userdebug"*|*"eng"*) echo "canary" ;;
-        *) echo "release" ;;
-    esac
+    case "$preview" in ''|0) ;; *) return 1 ;; esac
+    case "$release" in ''|*[!0-9.]*) return 1 ;; esac
+    echo release
 }
 
-# CORRIGÉ : Cette fonction ne fait plus l'apply elle-même, elle retourne juste le chemin distant
 update_non_tegu_profile() {
     device="$1"
 
@@ -705,7 +698,7 @@ update_non_tegu_profile() {
         channel="$FORCED_CHANNEL"
         log "channel: $channel (forced by argument)" >&2
     else
-        channel=$(detect_channel_from_fingerprint)
+        channel=$(detect_channel_from_fingerprint) || { log "channel ambiguous; select a profile explicitly" >&2; return 1; }
         log "channel: $channel (auto-detected)" >&2
     fi
 
@@ -751,7 +744,20 @@ update_non_tegu_profile() {
 apply_profile() {
     relpath="$1"
 
-    sh "$0" fetch "$relpath" || return 1
+    if fetch_output=$(sh "$0" fetch "$relpath"); then
+        fetch_rc=0
+    else
+        fetch_rc=$?
+    fi
+    printf '%s\n' "$fetch_output" | sed '/^status:/d'
+    if [ "$fetch_rc" -ne 0 ]; then
+        log "profile fetch failed rc=$fetch_rc" >&2
+        return 1
+    fi
+    if ! printf '%s\n' "$fetch_output" | grep -qx 'status: fetched'; then
+        log "profile fetch returned no success status" >&2
+        return 1
+    fi
 
     if [ "$(cfg_setting resetprop)" = false ]; then
         log "resetprop is disabled, props not re-applied" >&2
