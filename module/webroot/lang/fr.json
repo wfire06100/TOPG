@@ -43,7 +43,7 @@
   "ui_043": "optionnel",
   "msg_044": "Un build plus récent est disponible: appuyez sur \"Update Now\"",
   "msg_045": "Adresse copiée dans le presse-papiers",
-  "msg_046": "Déjà sur le build le plus récent",
+  "msg_046": "Le profil est déjà à jour.",
   "msg_047": "La version d'Android n'est plus usurpée. Redémarrez pour appliquer.",
   "msg_048": "Sauvegarde terminée : ${successCount}/${files.length} fichiers",
   "msg_049": "Sauvegarde créée : ${finalFilename}",
