@@ -1,0 +1,56 @@
+name: Fix fingerprint migration whitespace once
+on:
+  push:
+    branches: ['integration/copg-v6.13-vd-43856574245-1']
+    paths: ['.github/workflows/fix-fingerprint-whitespace-once.yml']
+permissions:
+  contents: write
+concurrency:
+  group: replace-fingerprint-integration
+  cancel-in-progress: false
+jobs:
+  fix:
+    if: github.repository == 'wfire06100/TOPG' && github.ref == 'refs/heads/integration/copg-v6.13-vd-43856574245-1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/copg-v6.13-vd-43856574245-1
+      - name: Correct migration and execute its existing validations
+        run: |
+          set -eu
+          python3 - <<'PY'
+          from pathlib import Path
+          import ast
+          import subprocess
+          import textwrap
+          p = Path('.github/workflows/replace-fingerprint-once.yml')
+          source = p.read_text()
+          old = "          text = text.replace('compare() {', additions + 'compare() {', 1)\n"
+          assert source.count(old) == 1, 'Migration anchor changed'
+          new = old + "          text = '\\n'.join(line.rstrip(' \\t') for line in text.splitlines()) + '\\n'\n"
+          source = source.replace(old, new, 1)
+          p.write_text(source)
+          start = source.index("          python3 - <<'PY'\n") + len("          python3 - <<'PY'\n")
+          end = source.index('\n          PY\n', start)
+          script = textwrap.dedent(source[start:end])
+          ast.parse(script)
+          assert 'backup.write_bytes(old)' in script
+          subprocess.run(['python3', '-c', script], check=True)
+          Path('.github/workflows/fix-fingerprint-whitespace-once.yml').unlink()
+          PY
+          sh -n module/fingerprint-update.sh
+          sandbox=$(mktemp -d)
+          trap 'rm -rf "$sandbox"' EXIT
+          cp -a module "$sandbox/module"
+          python3 tools/tee/webui_patch_sync.py "$sandbox/module/webroot/scripts.js"
+          sh -n "$sandbox/module/fingerprint-update.sh"
+          test -f backups/fingerprint-update/pre-replacement.sh
+          test ! -e "$sandbox/module/backups"
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- module/fingerprint-update.sh backups/fingerprint-update/pre-replacement.sh .github/workflows/replace-fingerprint-once.yml .github/workflows/fix-fingerprint-whitespace-once.yml
+          git commit -m 'feat(fingerprint): install reviewed updater with original backup'
+          git push origin HEAD:refs/heads/integration/copg-v6.13-vd-43856574245-1
