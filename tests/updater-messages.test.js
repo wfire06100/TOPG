@@ -1,0 +1,16 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const context = {document: {documentElement: {lang: 'fr'}}};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync('tools/tee/updater_messages.js', 'utf8'), context);
+const format = context.formatUpdaterMessage;
+assert.equal(format('already on the newest build', 'up-to-date'), null);
+assert.equal(format('channel: canary (auto-detected)'), 'Canal : canary (détection automatique)');
+assert.equal(format('props re-applied'), 'Propriétés système réappliquées.');
+assert.equal(format('local:  bluejay incremental 16754936 id ZP11.261016.008 ts 1793211236'), 'Profil local : bluejay — incrément : 16754936, ID : ZP11.261016.008, horodatage : 1793211236');
+context.document.documentElement.lang = 'en';
+assert.equal(format('props re-applied'), 'props re-applied');
+assert.equal(format('already on the newest build', 'up-to-date'), null);
+assert.equal(format('unknown diagnostic'), 'unknown diagnostic');
+console.log('Updater message localization and deduplication passed');
