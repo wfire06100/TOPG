@@ -39,6 +39,13 @@ SWITCH = r'''function switchTab(tabId, direction = null) {
         next.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
         next.style.transform = 'translateX(0)';
         next.style.opacity = '1';
+        next.scrollTop = 0;
+        const container = document.getElementById('tab-container');
+        if (container) container.scrollTop = 0;
+        if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+        if (typeof window.scrollTo === 'function') {
+            window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        }
         if (tabId === 'devices') setTimeout(() => renderDeviceList(), 100);
         if (tabId === 'tools') checkRebootPending();
     });
