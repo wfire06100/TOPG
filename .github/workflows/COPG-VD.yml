@@ -1,6 +1,15 @@
 name: TOPG release build
 on:
   workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Publication type (prerelease does not update the stable channel)'
+        required: true
+        default: prerelease
+        type: choice
+        options:
+          - prerelease
+          - release
   schedule:
     - cron: '17 */6 * * *'
   push:
@@ -196,6 +205,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Validate publication type
+        env:
+          RELEASE_TYPE: ${{ inputs.release_type }}
+        run: |
+          case "$RELEASE_TYPE" in
+            release|prerelease) ;;
+            *) echo 'Select release or prerelease before publishing.'; exit 1 ;;
+          esac
       - uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ needs.build.outputs.artifact_id }}
@@ -212,10 +229,20 @@ jobs:
           python3 tools/tee/prepare_release.py
           python3 tools/tee/compliance.py release-note
           python3 - <<'PY'
-          import json, os, zipfile
+          import json, os, re, zipfile
           from pathlib import Path
           from urllib.parse import quote
           root = Path('release-files')
+          notes = root / 'RELEASE_NOTES.md'
+          text = notes.read_text()
+          audits = list(re.finditer(r'^## TOPG commit audit[ \t]*\n(.*?)(?=^## |\Z)', text, re.M | re.S))
+          if len(audits) != 1:
+              raise SystemExit('Expected exactly one TOPG commit audit')
+          audit = audits[0]
+          body = audit.group(1).strip()
+          remainder = (text[:audit.start()] + text[audit.end():]).rstrip()
+          text = remainder + '\n\n<details>\n<summary>TOPG commit audit</summary>\n\n' + body + '\n\n</details>\n'
+          notes.write_text(text)
           archives = list(root.rglob('TOPG-*.zip'))
           if len(archives) != 1:
               raise SystemExit('Expected exactly one verified TOPG ZIP')
@@ -232,11 +259,12 @@ jobs:
                     'zipUrl': base + quote(archives[0].name, safe=''),
                     'changelog': base + 'changelog.md'}
           (root / 'update.json').write_text(json.dumps(update, indent=2) + '\n')
-          (root / 'changelog.md').write_text((root / 'RELEASE_NOTES.md').read_text())
+          (root / 'changelog.md').write_text(text)
           PY
       - name: Publish release with verified assets
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
           VERSION: ${{ needs.build.outputs.version }}
           VERSION_CODE: ${{ needs.build.outputs.version_code }}
           ZIP: ${{ steps.release.outputs.zip }}
@@ -263,6 +291,11 @@ jobs:
             404) echo 'Initializing the TOPG update channel.' ;;
             *) echo "Unable to verify previous update metadata (HTTP $status)."; exit 1 ;;
           esac
-          gh release create "$VERSION" "$ZIP" "$CHECKSUM" "$UPDATE" "$CHANGELOG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "TOPG $VERSION" --notes-file "$NOTES" --draft
-          gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --latest
-          echo "Release published: https://github.com/$GITHUB_REPOSITORY/releases/tag/$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          case "$RELEASE_TYPE" in
+            prerelease) set -- --prerelease --latest=false ;;
+            release) set -- --prerelease=false --latest ;;
+            *) echo 'Invalid publication type'; exit 1 ;;
+          esac
+          gh release create "$VERSION" "$ZIP" "$CHECKSUM" "$UPDATE" "$CHANGELOG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "TOPG $VERSION" --notes-file "$NOTES" --draft "$@"
+          gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false "$@"
+          echo "Published $RELEASE_TYPE: https://github.com/$GITHUB_REPOSITORY/releases/tag/$VERSION" >> "$GITHUB_STEP_SUMMARY"
