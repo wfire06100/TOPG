@@ -76,6 +76,8 @@ def apply(root):
     content = re.sub(handler, " btn.addEventListener('click',()=>{switchTab('tee');act(status);});", content, count=1, flags=re.M)
     script.write_text(source)
     tee.write_text(content)
+    from about_popup import apply as apply_about_popup
+    apply_about_popup(root)
 
 
 if __name__ == '__main__':
