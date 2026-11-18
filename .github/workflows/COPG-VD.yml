@@ -3,13 +3,32 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: 'Publication type (prerelease does not update the stable channel)'
+        description: 'Mode: build only, prerelease, or stable release'
         required: true
-        default: prerelease
+        default: build
         type: choice
         options:
+          - build
           - prerelease
           - release
+      tee_source:
+        description: 'TEE source: latest stable release, exact tag, or branch head'
+        required: true
+        default: latest
+        type: choice
+        options:
+          - latest
+          - tag
+          - branch
+      tee_tag:
+        description: 'Exact TEESimulator-RS tag (used only when TEE source is tag)'
+        required: false
+        type: string
+      tee_branch:
+        description: 'TEESimulator-RS branch (used only when TEE source is branch)'
+        required: true
+        default: main
+        type: string
   schedule:
     - cron: '17 */6 * * *'
   push:
@@ -34,27 +53,60 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Resolve engine release
+      - name: Resolve selected TEE source to immutable commit
         id: engine
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          TEE_SOURCE: ${{ inputs.tee_source }}
+          TEE_TAG: ${{ inputs.tee_tag }}
+          TEE_BRANCH: ${{ inputs.tee_branch }}
         run: |
           python3 - <<'PY'
           import json, os, re, urllib.request, urllib.parse
-          sha='d8099e29e38af7750dd9e3563cc4a38db9aa96bb'
-          if os.environ['EVENT_NAME'] in ('schedule','workflow_dispatch'):
-              base='https://api.github.com/repos/wfire06100/TEESimulator-RS/'
-              def api(path):
-                  request=urllib.request.Request(base+path,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','User-Agent':'TOPG-release-builder'})
-                  with urllib.request.urlopen(request,timeout=30) as response:
+          from urllib.error import HTTPError
+
+          def api(path):
+              base = 'https://api.github.com/repos/wfire06100/TEESimulator-RS/'
+              request = urllib.request.Request(base + path, headers={
+                  'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                  'Accept': 'application/vnd.github+json',
+                  'User-Agent': 'TOPG-release-builder'})
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
                       return json.load(response)
-              tag=api('releases/latest')['tag_name']
-              sha=api('commits/'+urllib.parse.quote(tag,safe=''))['sha']
-          if not re.fullmatch('[0-9a-f]{40}',sha):
+              except HTTPError as error:
+                  raise SystemExit('Cannot resolve requested TEE source (HTTP ' + str(error.code) + '): ' + path) from error
+
+          def resolve(event, source, tag, branch, api):
+              if event not in ('schedule', 'workflow_dispatch'):
+                  return 'd8099e29e38af7750dd9e3563cc4a38db9aa96bb'
+              mode = source if event == 'workflow_dispatch' else 'latest'
+              if mode == 'latest':
+                  ref = 'refs/tags/' + api('releases/latest')['tag_name']
+              elif mode == 'tag':
+                  if not tag.strip():
+                      raise ValueError('Tag TEE required')
+                  ref = 'refs/tags/' + tag.strip()
+              elif mode == 'branch':
+                  if not branch.strip():
+                      raise ValueError('Branch TEE required')
+                  ref = 'refs/heads/' + branch.strip()
+              else:
+                  raise ValueError('Invalid TEE source')
+              return api('commits/' + urllib.parse.quote(ref, safe=''))['sha']
+
+          event = os.environ['EVENT_NAME']
+          if event == 'workflow_dispatch' and os.environ['RELEASE_TYPE'] not in ('build', 'prerelease', 'release'):
+              raise SystemExit('Select build, prerelease, or release')
+          sha = resolve(event, os.environ.get('TEE_SOURCE', ''), os.environ.get('TEE_TAG', ''), os.environ.get('TEE_BRANCH', ''), api)
+          if not re.fullmatch('[0-9a-f]{40}', sha):
               raise SystemExit('Invalid engine commit')
-          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
-              output.write('sha='+sha+'\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('sha=' + sha + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('TEESimulator-RS source commit: `' + sha + '`\n')
           PY
       - uses: actions/cache/restore@v4
         if: github.event_name != 'workflow_dispatch'
@@ -195,7 +247,7 @@ jobs:
           key: topg-engine-${{ github.sha }}-${{ steps.engine.outputs.sha }}
   publish:
     needs: build
-    if: github.repository == 'wfire06100/TOPG' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.repository == 'wfire06100/TOPG' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (inputs.release_type == 'release' || inputs.release_type == 'prerelease')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
