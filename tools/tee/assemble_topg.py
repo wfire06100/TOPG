@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 EN = {
- 'tee_title':'TEE', 'tee_policy':'COPG-VD controls boot properties and security patches.',
+ 'tee_title':'Tee', 'tee_policy':'COPG-VD controls boot properties and security patches.',
  'tee_refresh':'Refresh status', 'tee_keybox':'Keybox', 'tee_personal':'Personal keybox (protected)',
  'tee_auto_update':'Automatic updates', 'tee_endpoint':'Mirror base URL (BASE/key returns base64 XML)',
  'tee_network':'Updates run after boot and every six hours. Prefer a trusted HTTPS mirror; HTTP is unauthenticated. XML structure checks do not prove validity or non-revocation.',
@@ -22,7 +22,7 @@ EN = {
  'ui_about_callout':'This WebUI runs locally. Optional profile and keybox updates use the network.'
 }
 FR = {
- 'tee_title':'TEE', 'tee_policy':'COPG-VD gère les propriétés de démarrage et les correctifs de sécurité.',
+ 'tee_title':'Tee', 'tee_policy':'COPG-VD gère les propriétés de démarrage et les correctifs de sécurité.',
  'tee_refresh':'Actualiser l’état', 'tee_keybox':'Keybox', 'tee_personal':'Keybox personnelle protégée',
  'tee_auto_update':'Mises à jour automatiques', 'tee_endpoint':'URL de base du miroir (BASE/key renvoie du XML en base64)',
  'tee_network':'Mise à jour après démarrage puis toutes les six heures. Privilégiez un miroir HTTPS fiable : HTTP n’est pas authentifié. Le contrôle XML ne garantit ni validité ni non-révocation.',
