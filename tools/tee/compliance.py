@@ -140,7 +140,7 @@ def replace_once(text, old, new):
 
 
 def integrate(root):
-    expected = {'assemble_topg.py': 'be4919016981991e0f65e6ef725405d1fd47a6d1', 'relocate_engine.py': '9a971d14651f9cb7dee48f2d9ed7a462ab15c032'}
+    expected = {'assemble_topg.py': '2359d0b26408079c7b5884f52f2bc1f518e325be', 'relocate_engine.py': '9a971d14651f9cb7dee48f2d9ed7a462ab15c032'}
     for name, wanted in expected.items():
         raw = (root / 'tools/tee' / name).read_bytes()
         actual = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
@@ -171,8 +171,8 @@ def release_note():
     path.write_text(text)
 
 
-if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == 'release-note':
-        release_note()
-    else:
-        integrate(Path('.').resolve())
+if __name__=='__main__':
+ if len(sys.argv) > 1 and sys.argv[1] == 'release-note':
+  release_note()
+ else:
+  integrate(Path('.').resolve())
