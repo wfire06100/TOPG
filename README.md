@@ -1,5 +1,3 @@
-# NO STARS PLEASE 
-
 If I have forgotten any credits, please let me know via a ticket.
 
 # TOPG
