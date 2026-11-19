@@ -12,6 +12,8 @@ SWITCH = r'''function switchTab(tabId, direction = null) {
     if (!tabs.includes(tabId)) return;
     const next = document.getElementById(`${tabId}-tab`);
     if (!next) return;
+    const sb = document.getElementById('device-savebar');
+    if (sb) sb.style.display = tabId === 'devices' ? '' : 'none';
     const current = currentTabId();
     if (current === tabId && next.classList.contains('active')) return;
     if (switchTab.pendingFrame != null) cancelAnimationFrame(switchTab.pendingFrame);
@@ -49,8 +51,6 @@ SWITCH = r'''function switchTab(tabId, direction = null) {
         if (tabId === 'devices') setTimeout(() => renderDeviceList(), 100);
         if (tabId === 'tools') checkRebootPending();
     });
-    const sb = document.getElementById('device-savebar');
-    if (sb) sb.style.display = tabId === 'devices' ? '' : 'none';
     if (!navFromPop) { try { history.pushState({ tab: tabId }, ''); } catch (e) {} }
 }'''
 
@@ -58,6 +58,25 @@ REVIEWED = {
     '7fb5f3bb1e8ad2afaebef05c078fe0726e1e43cbff5242a38b817a5a139e0ed3':
         "const tabs = ['about', 'devices', 'spoofing', 'system', 'tools'];",
 }
+
+
+def fix_initial_state(root):
+    web = root / 'module/webroot'
+    script = web / 'scripts.js'
+    source = script.read_text()
+    old = 'cat /data/adb/COPG-VD/update.status 2>/dev/null'
+    new = 'if [ -e /data/adb/COPG-VD/update.status ]; then cat /data/adb/COPG-VD/update.status; fi'
+    if source.count(old) != 1:
+        raise RuntimeError('Optional update status read changed; review required')
+    source = source.replace(old, new, 1)
+    page = web / 'index.html'
+    markup = page.read_text()
+    hidden = '<div class="device-savebar" id="device-savebar" style="display:none">'
+    if markup.count(hidden) != 1 or markup.count('<div id="devices-tab" class="tab-content active">') != 1:
+        raise RuntimeError('Initial Device/savebar markup changed; review required')
+    markup = markup.replace(hidden, '<div class="device-savebar" id="device-savebar">', 1)
+    script.write_text(source)
+    page.write_text(markup)
 
 
 def apply(root):
@@ -85,6 +104,7 @@ def apply(root):
     tee.write_text(content)
     from about_popup import apply as apply_about_popup
     apply_about_popup(root)
+    fix_initial_state(root)
 
 
 if __name__ == '__main__':
