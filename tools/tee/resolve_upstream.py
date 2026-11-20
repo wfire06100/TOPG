@@ -83,27 +83,42 @@ def resolve_616(base, upstream, ancestor):
     start = css_remote.index('.scope-app-search {')
     end = css_remote.index('.scope-apps-save, .scope-apps-cancel', start)
     css = once(css_local, old_css, css_remote[start:end])
-    workflow_path = '.github/workflows/COPG-VD.yml'
-    workflow = Path(workflow_path).read_text()
-    anchor = '      - name: Build COPG libraries\n'
-    step = "      - name: Build COPG scope helper\n        if: steps.built.outputs.cache-hit != 'true'\n        run: |\n          bash dex/build.sh\n          test -s module/etc/copgvd_scope.dex\n"
-    workflow = once(workflow, anchor, step + anchor)
+    adapter_path = 'tools/tee/webui_patch_sync.py'
+    adapter = read(base, adapter_path)
+    anchor = '    configure_startup(path.parent.parent)'
+    dex_build = '''    # Compile and stage the COPG scope helper after SDK setup, before packaging.
+    root = Path(__file__).resolve().parents[2]
+    subprocess.run(['bash', str(root / 'dex/build.sh')], cwd=root, check=True)
+    dex = (root / 'module/etc/copgvd_scope.dex').read_bytes()
+    if not dex.startswith(b'dex\\n'):
+        raise RuntimeError('Invalid or missing COPG scope Dex')
+    target = path.parent.parent / 'etc/copgvd_scope.dex'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(dex)
+    target.chmod(0o644)
+'''
+    adapter = once(adapter, anchor, dex_build + anchor)
+    compile(adapter, adapter_path, 'exec')
+    if git('diff', '--cached', '--name-only', base, '--', '.github/workflows').strip():
+        raise ValueError('Integration must not modify workflows; refusing push preparation')
+    if git('diff', '--name-only', '--', '.github/workflows').strip():
+        raise ValueError('Unstaged workflow modification; review required')
     paths = git('ls-files', '-z').split('\0')
     vdlu = sorted(set(p for p in paths if p.startswith(('module/vdlu/', 'module/webroot/vdlu-i18n/')) or p in ('module/webroot/vdlu.js', 'module/webroot/vdlu.css')))
     if vdlu:
         run('rm', '-f', '--ignore-unmatch', '--', *vdlu)
     Path(js_path).write_text(result)
     Path(css_path).write_text(css)
-    Path(workflow_path).write_text(workflow)
+    Path(adapter_path).write_text(adapter)
     updater = 'module/fingerprint-update.sh'
     run('restore', '--source=' + base, '--staged', '--worktree', '--', updater)
     subprocess.run(['node', '--check', js_path], check=True)
     subprocess.run(['sh', '-n', updater], check=True)
-    run('add', '--', js_path, css_path, workflow_path)
+    run('add', '--', js_path, css_path, adapter_path)
     with (Path('sync-report') / 'resolutions.txt').open('a') as out:
         out.write('COPG 6.16: scope picker/helpers and CSS ported to TOPG; Backup/Restore corrected; Indonesian language code updated.\n')
         out.write('TOPG fingerprint updater retained byte-for-byte from base. VDLU files removed, including newly added translations.\n')
-        out.write('TOPG build workflow retained with explicit Dex compilation. Other conflicts remain blocking.\n')
+        out.write('Workflows unchanged from TOPG base. Scope Dex compiled and staged by webui_patch_sync.py during assembly. Other conflicts remain blocking.\n')
 
 
 def resolve(base, upstream):
