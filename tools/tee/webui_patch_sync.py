@@ -142,6 +142,16 @@ if __name__ == '__main__':
     if len(sys.argv) != 2:
         raise SystemExit('Usage: webui_patch_sync.py SCRIPTS_JS')
     path = Path(sys.argv[1])
+    # Compile and stage the COPG scope helper after SDK setup, before packaging.
+    root = Path(__file__).resolve().parents[2]
+    subprocess.run(['bash', str(root / 'dex/build.sh')], cwd=root, check=True)
+    dex = (root / 'module/etc/copgvd_scope.dex').read_bytes()
+    if not dex.startswith(b'dex\n'):
+        raise RuntimeError('Invalid or missing COPG scope Dex')
+    target = path.parent.parent / 'etc/copgvd_scope.dex'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(dex)
+    target.chmod(0o644)
     configure_startup(path.parent.parent)
     path.write_text(transform(path.read_text()))
     subprocess.run(['node', '--check', str(path)], check=True)
