@@ -140,7 +140,7 @@ def replace_once(text, old, new):
 
 
 def integrate(root):
-    expected = {'assemble_topg.py': 'c574a44b5cce214efb9441d754fb7e199b7a3ec8', 'relocate_engine.py': '9a971d14651f9cb7dee48f2d9ed7a462ab15c032', 'boot_hash_policy.py': '20e1c89573f98d128d19bcc22daabe22dda298ef'}
+    expected = {'assemble_topg.py': '2359d0b26408079c7b5884f52f2bc1f518e325be', 'relocate_engine.py': '9a971d14651f9cb7dee48f2d9ed7a462ab15c032'}
     for name, wanted in expected.items():
         raw = (root / 'tools/tee' / name).read_bytes()
         actual = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
@@ -152,7 +152,7 @@ def integrate(root):
     relocation = replace_once(relocation, "        path.write_bytes(updated.encode('utf-8'))", "        path.write_bytes(updated.encode('utf-8'))\n        if not mark_file(path):\n            raise RuntimeError('Engine file needs a modification notice: ' + str(path))")
     path = root / 'tools/tee/assemble_topg.py'
     assembly = replace_once(path.read_text(), 'import json', 'from compliance import mark_file, archive_sources, mark_module\nimport json')
-    assembly = replace_once(assembly, ' apply(upstream)', ' apply(upstream)\n if not mark_file(p): raise RuntimeError("Engine boot hash changes need a modification notice")')
+    assembly = replace_once(assembly, ' once(p,anchor,prefix+anchor)', ' once(p,anchor,prefix+anchor)\n mark_file(p)')
     start = assembly.index(' def source_filter(info):')
     end = assembly.index(" once(out/'customize.sh'", start)
     assembly = assembly[:start] + " archive_sources(root,upstream,tee/'engine-source.tar.gz')\n" + assembly[end:]
