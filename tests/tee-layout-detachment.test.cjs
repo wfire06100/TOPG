@@ -20,12 +20,12 @@ for(const marker of [
 }
 function makeNode(tag){
  const node={
-  tagName:String(tag).toUpperCase(),children:[],listeners:{},style:{},attributes:{},hidden:false,textContent:'',className:'',
+  tagName:String(tag).toUpperCase(),children:[],listeners:{},style:{},attributes:{},hidden:false,textContent:'',className:'',id:'',
   append(...kids){this.children.push(...kids);},
   appendChild(kid){this.children.push(kid);return kid;},
   insertBefore(kid,ref){const i=this.children.indexOf(ref);if(i<0){this.children.push(kid);}else{this.children.splice(i,0,kid);}return kid;},
   remove(){this.removed=true;},
-  setAttribute(key,value){this.attributes[key]=value;},
+  setAttribute(key,value){this.attributes[key]=value;if(key==='id'){this.id=value;}},
   addEventListener(type,handler){(this.listeners[type]??=[]).push(handler);},
   click(){for(const handler of this.listeners.click||[]){handler();}}
  };
@@ -33,10 +33,9 @@ function makeNode(tag){
 }
 function run(){
  const created=[];
- const byId=new Map();
  const document={
   createElement(tag){const node=makeNode(tag);created.push(node);return node;},
-  getElementById(id){return byId.get(id)||null;}
+  getElementById(id){return created.find(node=>node.id===id)||null;}
  };
  const root=makeNode('div');
  root.replaceChildren=()=>{root.children.length=0;};
@@ -46,7 +45,7 @@ function run(){
  vm.createContext(context);
  vm.runInContext(source+'\nglobalThis.__topg={render,boot};',context);
  context.__topg.render(root,{device:'test',android:'15',build:'test',state:'ok',checks:[],logs:''});
- return {created,byId,execCalls,root,context};
+ return {created,execCalls,root,context};
 }
 const first=run();
 const reset=first.created.find(node=>node.id==='tee-reset');
@@ -62,7 +61,8 @@ const feedback=first.created.find(node=>node.id==='tee-reset-feedback');
 assert.ok(feedback,'Accessible feedback element must be created');
 assert.equal(feedback.attributes.role,'status');
 assert.equal(feedback.attributes['aria-live'],'polite');
-assert.equal(feedback.hidden,true);
+assert.equal(feedback.attributes.hidden,true);
+assert.equal(feedback.hidden,false,'The simulated node starts visible; the UI marks it hidden through its attribute');
 reset.click();
 const panel=first.created.find(node=>node.className==='notice'&&node.children.some(child=>child.textContent==='Delete the stored boot hash?'));
 assert.ok(panel,'In-panel confirmation must appear');
@@ -75,6 +75,5 @@ assert.equal(feedback.hidden,false);
 assert.equal(feedback.textContent,'Boot hash reset.');
 assert.ok(panel.removed,'Confirmation panel must close after the action');
 const absent=run();
-absent.created.length=0;
 absent.context.__topg.boot(null);
 console.log('PASS: diagnostics UI, mismatch notice, in-panel confirmation, root reset and accessible feedback verified.');
