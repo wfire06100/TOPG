@@ -38,8 +38,32 @@ function mount() {
  const bootResult=document.createElement('p');bootResult.setAttribute('role','status');bootResult.setAttribute('aria-live','polite');bootResult.hidden=true;
  diagnostics.append(actions(bootReset),bootResult);
  let bootResetSequence=0;
- bootReset.onclick=()=>{
-  if(bootReset.disabled||!confirm('Delete the saved boot hash (boot_hash.bin)? Persistent keys will not be deleted. Then reset the key in Attestation Key to request a fresh attestation.'))return;
+ let bootConfirmOpen=false;
+ function confirmBootHash(){
+  return new Promise(resolve=>{
+   const overlay=document.createElement('div');
+   overlay.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
+   const box=document.createElement('div');
+   box.setAttribute('role','dialog');box.setAttribute('aria-modal','true');box.setAttribute('aria-labelledby','tee-boot-confirm-title');box.setAttribute('aria-describedby','tee-boot-confirm-fr tee-boot-confirm-en');
+   box.style.cssText='background:#424242;color:#fff;width:100%;max-width:360px;max-height:85vh;overflow:auto;padding:20px;box-sizing:border-box;border-radius:3px;box-shadow:0 8px 28px #0008;font:14px/1.4 sans-serif';
+   const title=document.createElement('h2');title.id='tee-boot-confirm-title';title.textContent='Boot hash reset';title.style.cssText='font-size:18px;margin:0 0 16px';
+   const fr=document.createElement('p');fr.id='tee-boot-confirm-fr';fr.lang='fr';fr.textContent='Réinitialiser le boot hash enregistré ? Corrige une discordance avec ro.boot.vbmeta.digest sur certains appareils. Les clés persistantes sont conservées. Ensuite, réinitialisez la clé dans Attestation Key et relancez une attestation.';
+   const en=document.createElement('p');en.id='tee-boot-confirm-en';en.lang='en';en.textContent='Reset the saved boot hash? Fixes a mismatch with ro.boot.vbmeta.digest on some devices. Persistent keys are kept. Afterwards, reset the key in Attestation Key and run a new attestation.';
+   const row=document.createElement('div');row.style.cssText='display:flex;justify-content:flex-end;gap:12px;margin-top:20px';
+   const cancel=document.createElement('button'),ok=document.createElement('button');
+   cancel.type=ok.type='button';cancel.textContent='Annuler / Cancel';ok.textContent='OK';
+   for(const button of [cancel,ok])button.style.cssText='background:transparent;border:0;color:#b4c5ff;padding:10px;min-height:44px;font:inherit;cursor:pointer';
+   const previous=document.activeElement;
+   const close=accepted=>{document.removeEventListener('keydown',keys,true);overlay.remove();bootConfirmOpen=false;if(previous&&typeof previous.focus==='function')previous.focus();resolve(accepted);};
+   const keys=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close(false);}else if(e.key==='Tab'){e.preventDefault();(document.activeElement===cancel?ok:cancel).focus();}};
+   cancel.onclick=()=>close(false);ok.onclick=()=>close(true);
+   row.append(cancel,ok);box.append(title,fr,en,row);overlay.append(box);document.body.append(overlay);document.addEventListener('keydown',keys,true);cancel.focus();
+  });
+ }
+ bootReset.onclick=async()=>{
+  if(bootReset.disabled||bootConfirmOpen)return;
+  bootConfirmOpen=true;
+  if(!await confirmBootHash())return;
   bootReset.disabled=true;bootResult.hidden=false;bootResult.textContent='Resetting boot hash…';
   const callback='topg_boot_hash_reset_'+Date.now()+'_'+(++bootResetSequence);
   const finish=(ok,message)=>{delete window[callback];bootReset.disabled=false;bootResult.textContent=message;};
