@@ -6,8 +6,8 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../module/webroot/tee/tee_layout.js'),'utf8');
-const start=source.indexOf(" const diagnostics=card(");
-const end=source.indexOf(' root.replaceChildren(',start);
+const start=source.indexOf("const diag=card('Diagnostics'");
+const end=source.indexOf(" root.append(diag);",start);
 assert.ok(start>=0&&end>start,'Diagnostics block must exist');
 const block=source.slice(start,end);
 function execute(code,present=true){
@@ -22,10 +22,10 @@ function execute(code,present=true){
   card:()=>({rows:[],append(...rows){this.rows.push(...rows);}}),
   actions:(...items)=>{const controls=items.filter(Boolean);controls.forEach(n=>n.connected=false);return {controls};}
  };
- vm.runInNewContext(code+'\nglobalThis.result=diagnostics;',context);
+ vm.runInNewContext(code+'\nglobalThis.result=diag;',context);
  return {nodes,created,result:context.result};
 }
-const broken="const diagnostics=card('ui_tool_diag','Diagnostics');diagnostics.append(actions(get('tee-logs'),get('tee-reset')));get('tee-reset').classList.add('tee-danger');";
+const broken="const diag=card('Diagnostics','Local diagnostics and recovery');diag.append(actions(get('tee-logs'),get('tee-reset')));get('tee-reset').classList.add('tee-danger');";
 assert.throws(()=>execute(broken),/classList/,'The model must reproduce the original null lookup');
 const fixed=execute(block);
 const reset=fixed.nodes.get('tee-reset');
