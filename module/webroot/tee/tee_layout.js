@@ -31,6 +31,24 @@ function mount() {
  const reset=get('tee-reset');
  if(reset)reset.classList.add('tee-danger');
  diagnostics.append(actions(get('tee-logs'),reset));
+ const bootReset=document.createElement('button');
+ bootReset.id='tee-reset-boot-hash';bootReset.type='button';bootReset.className='action-btn';
+ bootReset.textContent='Reset boot hash';
+ bootReset.style.cssText='width:100%;background:rgba(255,145,0,.16);color:#ff9800;border:1px solid #ff9800;box-shadow:0 0 10px rgba(255,145,0,.22),inset 0 0 8px rgba(255,145,0,.08)';
+ const bootResult=document.createElement('p');bootResult.setAttribute('role','status');bootResult.setAttribute('aria-live','polite');bootResult.hidden=true;
+ diagnostics.append(actions(bootReset),bootResult);
+ let bootResetSequence=0;
+ bootReset.onclick=()=>{
+  if(bootReset.disabled||!confirm('Delete the saved boot hash (boot_hash.bin)? Persistent keys will not be deleted. Then reset the key in Attestation Key to request a fresh attestation.'))return;
+  bootReset.disabled=true;bootResult.hidden=false;bootResult.textContent='Resetting boot hash…';
+  const callback='topg_boot_hash_reset_'+Date.now()+'_'+(++bootResetSequence);
+  const finish=(ok,message)=>{delete window[callback];bootReset.disabled=false;bootResult.textContent=message;};
+  window[callback]=(code,stdout,stderr)=>{const ok=code===0||code==='0';finish(ok,ok?'Boot hash reset. Reset the key in Attestation Key, then run a new attestation.':([stdout,stderr].filter(Boolean).join('\n')||'Boot hash reset failed.'));};
+  try{
+   if(typeof ksu==='undefined'||typeof ksu.exec!=='function')throw new Error('Root bridge unavailable');
+   ksu.exec("sh -c 'test \"$(id -u)\" = 0 && rm -f /data/adb/COPG-VD/tee/boot_hash.bin && test ! -e /data/adb/COPG-VD/tee/boot_hash.bin'",'{}',callback);
+  }catch(e){finish(false,String(e));}
+ };
  root.replaceChildren(status,keybox,targets,schedule,diagnostics);
  if(existingApps)appSlot.append(existingApps);
  get('tee-target').rows=8;
