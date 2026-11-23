@@ -56,11 +56,31 @@
     return s;
   }
 
+  // TOPG boot hash controls are created dynamically outside the language dictionaries.
+  function applyBootHashLanguage() {
+    var french = window.I18N && window.I18N.current === "fr";
+    function text(node, value) { if (node && node.textContent !== value) node.textContent = value; }
+    text(document.getElementById("tee-reset-boot-hash"), french ? "Réinitialiser le boot hash" : "Reset boot hash");
+    var title = document.getElementById("tee-boot-confirm-title");
+    if (!title) return;
+    text(title, french ? "Réinitialiser le boot hash" : "Boot hash reset");
+    var fr = document.getElementById("tee-boot-confirm-fr"), en = document.getElementById("tee-boot-confirm-en");
+    if (fr) fr.hidden = !french;
+    if (en) en.hidden = french;
+    var box = title.parentElement;
+    if (box) {
+      box.setAttribute("lang", french ? "fr" : "en");
+      box.setAttribute("aria-describedby", french ? "tee-boot-confirm-fr" : "tee-boot-confirm-en");
+      text(box.querySelector("button"), french ? "Annuler" : "Cancel");
+    }
+  }
+
   function apply(root) {
     var r = root || document;
     r.querySelectorAll("[data-i18n]").forEach(function (el) { el.textContent = t(el.getAttribute("data-i18n")); });
     r.querySelectorAll("[data-i18n-ph]").forEach(function (el) { el.setAttribute("placeholder", t(el.getAttribute("data-i18n-ph"))); });
     r.querySelectorAll("[data-i18n-title]").forEach(function (el) { el.setAttribute("title", t(el.getAttribute("data-i18n-title"))); });
+    applyBootHashLanguage();
   }
 
   window.I18N = {
@@ -72,4 +92,8 @@
     async set(lang) { this.current = lang; try { localStorage.setItem("copgvd_lang", lang); } catch (e) {} await load(lang); apply(document); }
   };
   window.t = t;
+  // Translate newly mounted controls and dialogs before the next browser paint.
+  new MutationObserver(function (records) {
+    if (records.some(function (record) { return record.addedNodes.length > 0; })) applyBootHashLanguage();
+  }).observe(document, { childList: true, subtree: true });
 })();
