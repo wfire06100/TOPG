@@ -42,10 +42,13 @@ def once(path, old, new):
  path.write_text(s.replace(old,new,1))
 
 def patch(upstream):
+ from boot_hash_policy import apply
  p=upstream/'app/src/main/java/org/matrix/TEESimulator/util/AndroidDeviceUtils.kt'
+ if 'boot_hash.txt:prop' in p.read_text(): raise RuntimeError('Boot hash policy already patched')
  anchor='        getProperty(propertyName, expectedSize)?.let {'
  prefix='        // TOPG: preserve existing boot identity before consulting live properties.\n        readFromFile(propertyName, expectedSize)?.let {\n            recordSource("persistent-file")\n            return it\n        }\n'
  once(p,anchor,prefix+anchor)
+ apply(upstream)
 
 def assemble(root,engine,upstream,out):
  if out.exists(): raise RuntimeError('Output directory must not exist')
